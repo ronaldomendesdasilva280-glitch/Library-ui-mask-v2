@@ -1,0 +1,595 @@
+--[=[
+ ██████╗ ██╗   ██╗██╗    ██████╗     ██╗     ██╗   ██╗ █████╗ 
+██╔════╝ ██║   ██║██║    ╚════██╗    ██║     ██║   ██║██╔══██╗
+██║  ███╗██║   ██║██║     █████╔╝    ██║     ██║   ██║███████║
+██║   ██║██║   ██║██║    ██╔═══╝     ██║     ██║   ██║██╔══██║
+╚██████╔╝╚██████╔╝██║    ███████╗    ███████╗╚██████╔╝██║  ██║
+ ╚═════╝  ╚═════╝ ╚═╝    ╚══════╝    ╚══════╝ ╚═════╝ ╚═╝  ╚═╝
+          Professional Roblox UI Library  |  @uniquadev
+          Inspired by Kavo, WindUI & others
+]=]
+
+-- ============================================================
+--  GUI2LUA LIBRARY  v1.0
+--  Usage example at the bottom of this file
+-- ============================================================
+
+local GUI2LUA = {}
+GUI2LUA.__index = GUI2LUA
+
+-- ── Services ────────────────────────────────────────────────
+local Players        = game:GetService("Players")
+local RunService     = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService   = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ── Font Map ─────────────────────────────────────────────────
+-- Only official / usable Roblox fonts
+local Fonts = {
+    Arcade       = Font.new("rbxasset://fonts/families/PressStart2P.json"),
+    GothamBold   = Font.new("rbxasset://fonts/families/GothamSSm.json",  Enum.FontWeight.Bold),
+    Gotham       = Font.new("rbxasset://fonts/families/GothamSSm.json"),
+    Roboto       = Font.new("rbxasset://fonts/families/Roboto.json"),
+    RobotoBold   = Font.new("rbxasset://fonts/families/Roboto.json",     Enum.FontWeight.Bold),
+    Ubuntu       = Font.new("rbxasset://fonts/families/Ubuntu.json"),
+    Montserrat   = Font.new("rbxasset://fonts/families/Montserrat.json"),
+    SourceSans   = Font.new("rbxasset://fonts/families/SourceSansPro.json"),
+    Bangers      = Font.new("rbxasset://fonts/families/Bangers.json"),
+    Oswald       = Font.new("rbxasset://fonts/families/Oswald.json"),
+    FredokaOne   = Font.new("rbxasset://fonts/families/FredokaOne.json"),
+    Nunito       = Font.new("rbxasset://fonts/families/Nunito.json"),
+    Sarpanch     = Font.new("rbxasset://fonts/families/Sarpanch.json"),
+}
+
+-- ── Defaults ─────────────────────────────────────────────────
+local DEFAULT_FONT      = Fonts.Arcade
+local DEFAULT_FONTSIZE  = 18  -- range 1-18
+local TOGGLE_HEIGHT     = 36  -- px height of each toggle button
+local TOGGLE_PADDING    = 6   -- px gap between toggles
+
+-- ── Internal helpers ─────────────────────────────────────────
+local function clampFontSize(size)
+    if type(size) ~= "number" then return DEFAULT_FONTSIZE end
+    return math.clamp(math.floor(size), 1, 18)
+end
+
+local function resolveFont(fontName)
+    if fontName == nil then return DEFAULT_FONT end
+    return Fonts[fontName] or DEFAULT_FONT
+end
+
+-- ── Drag helper (for OPENGUI button) ─────────────────────────
+local function makeDraggable(gui)
+    local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
+
+    gui.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging   = true
+            dragStart  = input.Position
+            startPos   = gui.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    gui.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input == dragInput then
+            local delta = input.Position - dragStart
+            gui.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
+-- ============================================================
+--  GUI2LUA:new(options)
+--  Creates and returns a new Window object
+--
+--  options = {
+--    Title       = "My Script",       -- window title text
+--    BorderColor = Color3.fromRGB(255,8,25),  -- all border color
+--    Font        = "Arcade",          -- font name (string key)
+--    FontSize    = 18,                -- 1-18
+--    OpenGuiID   = "",                -- rbxassetid for open button image
+--  }
+-- ============================================================
+function GUI2LUA.new(options)
+    options = options or {}
+
+    local self = setmetatable({}, GUI2LUA)
+
+    -- Config
+    self._borderColor = options.BorderColor or Color3.fromRGB(255, 8, 25)
+    self._font        = resolveFont(options.Font)
+    self._fontSize    = clampFontSize(options.FontSize)
+    self._title       = options.Title    or "GUI2LUA"
+    self._openGuiID   = options.OpenGuiID or ""
+    self._strokes     = {}   -- collect all UIStrokes for bulk color change
+    self._toggleCount = 0
+    self._visible     = true
+
+    self:_buildGui()
+    return self
+end
+
+-- ── Build the full GUI hierarchy ─────────────────────────────
+function GUI2LUA:_buildGui()
+    -- ScreenGui
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name          = "GUI2LUA_Screen"
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.ResetOnSpawn  = false
+    screenGui.Parent        = PlayerGui
+    self._screenGui = screenGui
+
+    -- ── Main Frame ───────────────────────────────────────────
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name                = "MainFrame"
+    mainFrame.Size                = UDim2.new(0, 320, 0, 420)
+    mainFrame.Position            = UDim2.new(0.5, -160, 0.5, -210)
+    mainFrame.BackgroundColor3    = Color3.fromRGB(28, 28, 32)
+    mainFrame.BackgroundTransparency = 0.08
+    mainFrame.BorderSizePixel     = 0
+    mainFrame.Parent              = screenGui
+    self._mainFrame = mainFrame
+
+    local mainCorner = Instance.new("UICorner", mainFrame)
+    mainCorner.CornerRadius = UDim.new(0, 10)
+
+    local mainStroke = Instance.new("UIStroke", mainFrame)
+    mainStroke.Name      = "Bordas"
+    mainStroke.Thickness = 2
+    mainStroke.Color     = self._borderColor
+    table.insert(self._strokes, mainStroke)
+
+    -- subtle drop shadow (frame behind)
+    local shadow = Instance.new("Frame")
+    shadow.Name                = "Shadow"
+    shadow.Size                = UDim2.new(1, 14, 1, 14)
+    shadow.Position            = UDim2.new(0, -7, 0, 7)
+    shadow.BackgroundColor3    = Color3.fromRGB(0, 0, 0)
+    shadow.BackgroundTransparency = 0.65
+    shadow.BorderSizePixel     = 0
+    shadow.ZIndex              = mainFrame.ZIndex - 1
+    shadow.Parent              = mainFrame
+    Instance.new("UICorner", shadow).CornerRadius = UDim.new(0, 14)
+
+    -- ── Title bar ────────────────────────────────────────────
+    local titleBar = Instance.new("Frame")
+    titleBar.Name             = "TitleBar"
+    titleBar.Size             = UDim2.new(1, 0, 0, 48)
+    titleBar.Position         = UDim2.new(0, 0, 0, 0)
+    titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+    titleBar.BackgroundTransparency = 0.05
+    titleBar.BorderSizePixel  = 0
+    titleBar.ZIndex           = 2
+    titleBar.Parent           = mainFrame
+
+    local titleCorner = Instance.new("UICorner", titleBar)
+    titleCorner.CornerRadius = UDim.new(0, 10)
+
+    -- bottom fill to square the bottom corners of the title bar
+    local titleFill = Instance.new("Frame")
+    titleFill.Name             = "BottomFill"
+    titleFill.Size             = UDim2.new(1, 0, 0, 10)
+    titleFill.Position         = UDim2.new(0, 0, 1, -10)
+    titleFill.BackgroundColor3 = titleBar.BackgroundColor3
+    titleFill.BackgroundTransparency = titleBar.BackgroundTransparency
+    titleFill.BorderSizePixel  = 0
+    titleFill.ZIndex           = 2
+    titleFill.Parent           = titleBar
+
+    local titleStroke = Instance.new("UIStroke", titleBar)
+    titleStroke.Name      = "Bordas"
+    titleStroke.Thickness = 2
+    titleStroke.Color     = self._borderColor
+    table.insert(self._strokes, titleStroke)
+
+    -- accent line under title
+    local accentLine = Instance.new("Frame")
+    accentLine.Name             = "AccentLine"
+    accentLine.Size             = UDim2.new(0.85, 0, 0, 2)
+    accentLine.Position         = UDim2.new(0.075, 0, 1, -2)
+    accentLine.BackgroundColor3 = self._borderColor
+    accentLine.BorderSizePixel  = 0
+    accentLine.ZIndex           = 3
+    accentLine.Parent           = titleBar
+    self._accentLine = accentLine
+
+    -- Title label
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Name                = "TitleLabel"
+    titleLabel.Size                = UDim2.new(1, -16, 1, 0)
+    titleLabel.Position            = UDim2.new(0, 16, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text                = self._title
+    titleLabel.TextColor3          = Color3.fromRGB(255, 255, 255)
+    titleLabel.TextSize            = self._fontSize
+    titleLabel.FontFace            = self._font
+    titleLabel.TextXAlignment      = Enum.TextXAlignment.Left
+    titleLabel.ZIndex              = 3
+    titleLabel.Parent              = titleBar
+    self._titleLabel = titleLabel
+
+    local titleTextStroke = Instance.new("UIStroke", titleLabel)
+    titleTextStroke.Thickness = 1.5
+    titleTextStroke.Color     = Color3.fromRGB(0, 0, 0)
+    titleTextStroke.Transparency = 0.3
+
+    -- ── Scroll container ─────────────────────────────────────
+    local scrollFrame = Instance.new("ScrollingFrame")
+    scrollFrame.Name                  = "ScrollFrame"
+    scrollFrame.Size                  = UDim2.new(1, -12, 1, -58)
+    scrollFrame.Position              = UDim2.new(0, 6, 0, 54)
+    scrollFrame.BackgroundTransparency = 1
+    scrollFrame.BorderSizePixel       = 0
+    scrollFrame.ScrollBarThickness    = 4
+    scrollFrame.ScrollBarImageColor3  = self._borderColor
+    scrollFrame.CanvasSize            = UDim2.new(0, 0, 0, 0)
+    scrollFrame.AutomaticCanvasSize   = Enum.AutomaticSize.Y
+    scrollFrame.ScrollingDirection    = Enum.ScrollingDirection.Y
+    scrollFrame.ElasticBehavior       = Enum.ElasticBehavior.WhenScrollable
+    scrollFrame.Parent                = mainFrame
+    self._scrollFrame = scrollFrame
+    self._scrollBarRef = scrollFrame  -- for border color update
+
+    local listLayout = Instance.new("UIListLayout", scrollFrame)
+    listLayout.Padding          = UDim.new(0, TOGGLE_PADDING)
+    listLayout.SortOrder        = Enum.SortOrder.LayoutOrder
+    listLayout.FillDirection    = Enum.FillDirection.Vertical
+    listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+    local scrollPadding = Instance.new("UIPadding", scrollFrame)
+    scrollPadding.PaddingTop    = UDim.new(0, 6)
+    scrollPadding.PaddingBottom = UDim.new(0, 6)
+    scrollPadding.PaddingLeft   = UDim.new(0, 4)
+    scrollPadding.PaddingRight  = UDim.new(0, 4)
+
+    -- ── OPENGUI draggable button ──────────────────────────────
+    local openBtn = Instance.new("ImageButton")
+    openBtn.Name             = "OPENGUI"
+    openBtn.Size             = UDim2.new(0, 54, 0, 54)
+    openBtn.Position         = UDim2.new(0, 20, 0.5, -27)
+    openBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
+    openBtn.BackgroundTransparency = 0.1
+    openBtn.BorderSizePixel  = 0
+    openBtn.Image            = (self._openGuiID ~= "") 
+                               and ("rbxassetid://" .. self._openGuiID)
+                               or  "rbxasset://textures/ui/GuiImagePlaceholder.png"
+    openBtn.ImageColor3      = Color3.fromRGB(255, 255, 255)
+    openBtn.ZIndex           = 10
+    openBtn.Parent           = screenGui
+    self._openBtn = openBtn
+
+    local openCorner = Instance.new("UICorner", openBtn)
+    openCorner.CornerRadius = UDim.new(1, 0)
+
+    local openStroke = Instance.new("UIStroke", openBtn)
+    openStroke.Name      = "Bordas"
+    openStroke.Thickness = 2
+    openStroke.Color     = self._borderColor
+    table.insert(self._strokes, openStroke)
+
+    -- make it draggable
+    makeDraggable(openBtn)
+
+    -- toggle visibility on click
+    openBtn.MouseButton1Click:Connect(function()
+        self:_toggleVisibility()
+    end)
+
+    -- ── Notification label (optional UX polish) ───────────────
+    -- small "OPEN/CLOSE" hint above the button
+    local hint = Instance.new("TextLabel")
+    hint.Name                = "Hint"
+    hint.Size                = UDim2.new(0, 70, 0, 16)
+    hint.Position            = UDim2.new(0.5, -35, 0, -20)
+    hint.BackgroundTransparency = 1
+    hint.Text                = "OPEN"
+    hint.TextColor3          = self._borderColor
+    hint.TextSize            = 10
+    hint.FontFace            = DEFAULT_FONT
+    hint.ZIndex              = 11
+    hint.Parent              = openBtn
+    self._hint = hint
+end
+
+-- ── Toggle GUI visibility ─────────────────────────────────────
+function GUI2LUA:_toggleVisibility()
+    self._visible = not self._visible
+    self._mainFrame.Visible = self._visible
+    self._hint.Text = self._visible and "CLOSE" or "OPEN"
+
+    -- animate with tween
+    local tween = TweenService:Create(
+        self._mainFrame,
+        TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+        { BackgroundTransparency = self._visible and 0.08 or 1 }
+    )
+    tween:Play()
+end
+
+-- ============================================================
+--  Window:SetBorderColor(color)
+--  Changes ALL borders/strokes at once
+-- ============================================================
+function GUI2LUA:SetBorderColor(color)
+    self._borderColor = color
+    for _, stroke in ipairs(self._strokes) do
+        stroke.Color = color
+    end
+    -- also update accent line, scroll bar, and hint
+    self._accentLine.BackgroundColor3    = color
+    self._scrollFrame.ScrollBarImageColor3 = color
+    self._hint.TextColor3               = color
+end
+
+-- ============================================================
+--  Window:SetTitle(text)
+-- ============================================================
+function GUI2LUA:SetTitle(text)
+    self._titleLabel.Text = tostring(text)
+end
+
+-- ============================================================
+--  Window:SetFont(fontName)
+--  fontName = string key from Fonts table
+-- ============================================================
+function GUI2LUA:SetFont(fontName)
+    self._font = resolveFont(fontName)
+    self._titleLabel.FontFace = self._font
+    -- update existing toggles
+    for _, toggle in ipairs(self._mainFrame.ScrollFrame:GetChildren()) do
+        if toggle:IsA("TextButton") then
+            toggle.FontFace = self._font
+        end
+    end
+end
+
+-- ============================================================
+--  Window:SetFontSize(size)   (1-18)
+-- ============================================================
+function GUI2LUA:SetFontSize(size)
+    self._fontSize = clampFontSize(size)
+    self._titleLabel.TextSize = self._fontSize
+    for _, toggle in ipairs(self._scrollFrame:GetChildren()) do
+        if toggle:IsA("TextButton") then
+            toggle.TextSize = self._fontSize
+        end
+    end
+end
+
+-- ============================================================
+--  Window:SetOpenGuiImage(assetId)
+--  assetId = number or string (without prefix)
+-- ============================================================
+function GUI2LUA:SetOpenGuiImage(assetId)
+    self._openGuiID = tostring(assetId)
+    self._openBtn.Image = "rbxassetid://" .. self._openGuiID
+end
+
+-- ============================================================
+--  Window:AddToggle(options) → toggleObject
+--
+--  options = {
+--    Name     = "Speed Hack",
+--    Default  = false,
+--    Color    = Color3.fromRGB(255,8,25),  -- ON indicator color
+--    Callback = function(state) ... end,
+--  }
+-- ============================================================
+function GUI2LUA:AddToggle(options)
+    options = options or {}
+
+    local toggleName  = options.Name     or ("Toggle " .. (self._toggleCount + 1))
+    local defaultVal  = options.Default  or false
+    local onColor     = options.Color    or self._borderColor
+    local callback    = options.Callback or function() end
+
+    self._toggleCount += 1
+
+    local state = defaultVal
+
+    -- ── Toggle button ────────────────────────────────────────
+    local btn = Instance.new("TextButton")
+    btn.Name             = "Toggle_" .. self._toggleCount
+    btn.LayoutOrder      = self._toggleCount
+    btn.Size             = UDim2.new(1, -8, 0, TOGGLE_HEIGHT)
+    btn.BackgroundColor3 = Color3.fromRGB(38, 38, 44)
+    btn.BackgroundTransparency = 0.1
+    btn.BorderSizePixel  = 0
+    btn.Text             = ""
+    btn.AutoButtonColor  = false
+    btn.ZIndex           = 3
+    btn.Parent           = self._scrollFrame
+
+    local btnCorner = Instance.new("UICorner", btn)
+    btnCorner.CornerRadius = UDim.new(0, 7)
+
+    local btnStroke = Instance.new("UIStroke", btn)
+    btnStroke.Name      = "Bordas"
+    btnStroke.Thickness = 1.5
+    btnStroke.Color     = self._borderColor
+    table.insert(self._strokes, btnStroke)
+
+    -- ── Toggle label ─────────────────────────────────────────
+    local label = Instance.new("TextLabel")
+    label.Name                = "Label"
+    label.Size                = UDim2.new(1, -52, 1, 0)
+    label.Position            = UDim2.new(0, 12, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text                = toggleName
+    label.TextColor3          = Color3.fromRGB(220, 220, 220)
+    label.TextSize            = self._fontSize
+    label.FontFace            = self._font
+    label.TextXAlignment      = Enum.TextXAlignment.Left
+    label.ZIndex              = 4
+    label.Parent              = btn
+
+    local labelStroke = Instance.new("UIStroke", label)
+    labelStroke.Thickness = 1
+    labelStroke.Color     = Color3.fromRGB(0, 0, 0)
+    labelStroke.Transparency = 0.5
+
+    -- ── Toggle pill (ON/OFF indicator) ───────────────────────
+    local pillBg = Instance.new("Frame")
+    pillBg.Name             = "PillBg"
+    pillBg.Size             = UDim2.new(0, 36, 0, 20)
+    pillBg.Position         = UDim2.new(1, -44, 0.5, -10)
+    pillBg.BackgroundColor3 = Color3.fromRGB(60, 60, 68)
+    pillBg.BorderSizePixel  = 0
+    pillBg.ZIndex           = 4
+    pillBg.Parent           = btn
+    Instance.new("UICorner", pillBg).CornerRadius = UDim.new(1, 0)
+
+    local pillKnob = Instance.new("Frame")
+    pillKnob.Name             = "Knob"
+    pillKnob.Size             = UDim2.new(0, 14, 0, 14)
+    pillKnob.Position         = UDim2.new(0, 3, 0.5, -7)
+    pillKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    pillKnob.BorderSizePixel  = 0
+    pillKnob.ZIndex           = 5
+    pillKnob.Parent           = pillBg
+    Instance.new("UICorner", pillKnob).CornerRadius = UDim.new(1, 0)
+
+    -- ── Internal update function ──────────────────────────────
+    local function updateVisual(on, tween)
+        local knobTarget = on and UDim2.new(1, -17, 0.5, -7) or UDim2.new(0, 3, 0.5, -7)
+        local bgTarget   = on and onColor or Color3.fromRGB(60, 60, 68)
+        local knobColor  = on and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(160, 160, 160)
+
+        if tween then
+            TweenService:Create(pillKnob, TweenInfo.new(0.18, Enum.EasingStyle.Quart), { Position = knobTarget, BackgroundColor3 = knobColor }):Play()
+            TweenService:Create(pillBg,   TweenInfo.new(0.18, Enum.EasingStyle.Quart), { BackgroundColor3 = bgTarget }):Play()
+            TweenService:Create(btn,      TweenInfo.new(0.18, Enum.EasingStyle.Quart), { BackgroundColor3 = on and Color3.fromRGB(44, 44, 52) or Color3.fromRGB(38, 38, 44) }):Play()
+        else
+            pillKnob.Position         = knobTarget
+            pillKnob.BackgroundColor3 = knobColor
+            pillBg.BackgroundColor3   = bgTarget
+        end
+    end
+
+    -- apply default
+    updateVisual(state, false)
+
+    -- ── Click handler ─────────────────────────────────────────
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        updateVisual(state, true)
+        task.spawn(callback, state)
+    end)
+
+    -- Return a controller object
+    local toggleObj = {}
+
+    function toggleObj:SetState(val)
+        state = val
+        updateVisual(state, true)
+        task.spawn(callback, state)
+    end
+
+    function toggleObj:GetState()
+        return state
+    end
+
+    function toggleObj:SetColor(col)
+        onColor = col
+        if state then
+            TweenService:Create(pillBg, TweenInfo.new(0.18), { BackgroundColor3 = col }):Play()
+        end
+    end
+
+    return toggleObj
+end
+
+-- ============================================================
+--  Window:Destroy()
+-- ============================================================
+function GUI2LUA:Destroy()
+    self._screenGui:Destroy()
+end
+
+-- ============================================================
+--  USAGE EXAMPLE
+--  (Delete or comment out in production, put in a LocalScript)
+-- ============================================================
+--[[
+
+local Library = loadstring(game:HttpGet("YOUR_URL_HERE"))()
+-- OR if using directly:
+-- local Library = require(game.ReplicatedStorage.GUI2LUA)
+
+local Window = Library.new({
+    Title       = "GUI2LUA",
+    BorderColor = Color3.fromRGB(255, 8, 25),   -- red borders
+    Font        = "Arcade",                      -- PressStart2P
+    FontSize    = 14,
+    OpenGuiID   = "12345678",                    -- your image asset id
+})
+
+-- Change all borders to pink at once
+Window:SetBorderColor(Color3.fromRGB(255, 105, 180))
+
+-- Add toggles (they stack automatically in scroll)
+local speedToggle = Window:AddToggle({
+    Name     = "Speed Hack",
+    Default  = false,
+    Color    = Color3.fromRGB(0, 255, 128),
+    Callback = function(state)
+        print("Speed Hack:", state)
+        -- your code here
+    end,
+})
+
+local flyToggle = Window:AddToggle({
+    Name     = "Fly",
+    Default  = false,
+    Callback = function(state)
+        print("Fly:", state)
+    end,
+})
+
+local espToggle = Window:AddToggle({
+    Name     = "ESP",
+    Default  = true,
+    Color    = Color3.fromRGB(255, 200, 0),
+    Callback = function(state)
+        print("ESP:", state)
+    end,
+})
+
+-- Programmatically change a toggle
+speedToggle:SetState(true)
+print(flyToggle:GetState())  -- false
+
+-- Change font mid-session
+Window:SetFont("GothamBold")
+Window:SetFontSize(12)
+
+-- Change open button image
+Window:SetOpenGuiImage("12345678")
+
+-- Destroy everything when done
+-- Window:Destroy()
+
+]]
+
+return GUI2LUA
