@@ -1,0 +1,576 @@
+-- ╔══════════════════════════════════════════════════════════════╗
+-- ║         SAVE INSTANCES PRO  ⚡ FAST EDITION                 ║
+-- ║     Batch Processing • Parallel Decompile • Zero Yield      ║
+-- ╚══════════════════════════════════════════════════════════════╝
+
+local Players      = game:GetService("Players")
+local CoreGui      = game:GetService("CoreGui")
+local RunService   = game:GetService("RunService")
+
+-- ── Capacidades do executor ────────────────────────────────────
+local canWrite     = writefile  ~= nil
+local canDecomp    = decompile  ~= nil
+local canMakeDir   = makefolder ~= nil
+
+-- ── Pastas de saída ────────────────────────────────────────────
+local ROOT    = "SaveInstances_Fast"
+local F_SCR   = ROOT .. "/Scripts"
+local F_LOC   = ROOT .. "/LocalScripts"
+local F_MOD   = ROOT .. "/ModuleScripts"
+local F_REM   = ROOT .. "/Remotes.txt"
+
+-- ── Batch size: quantos itens processa por frame ───────────────
+-- Aumentar = mais rápido, mais chance de lag spike
+-- 80 é um bom equilíbrio para a maioria dos executores
+local BATCH = 80
+
+-- ── Classes visuais/físicas ignoradas ─────────────────────────
+local SKIP = {
+    Part=1,MeshPart=1,UnionOperation=1,SpecialMesh=1,
+    Model=1,Decal=1,Texture=1,SurfaceAppearance=1,
+    Humanoid=1,HumanoidDescription=1,Accessory=1,
+    Shirt=1,Pants=1,CharacterMesh=1,BodyColors=1,
+    Hat=1,Tool=1,BasePart=1,WedgePart=1,TrussPart=1,
+    CylinderMesh=1,BlockMesh=1,CornerWedgePart=1,
+    Seat=1,VehicleSeat=1,SpawnLocation=1,Terrain=1,
+    Sky=1,Atmosphere=1,Lighting=1,Beam=1,Trail=1,
+    ParticleEmitter=1,Fire=1,Smoke=1,Sparkles=1,
+    BillboardGui=1,SurfaceGui=1,Attachment=1,
+    Motor6D=1,Weld=1,WeldConstraint=1,
+    BallSocketConstraint=1,HingeConstraint=1,
+    BodyPosition=1,BodyVelocity=1,BodyGyro=1,
+    ClickDetector=1,ProximityPrompt=1,Sound=1,
+    SoundGroup=1,Folder=1,Animation=1,
+    AnimationController=1,Animator=1,
+    IntValue=1,StringValue=1,BoolValue=1,
+    NumberValue=1,ObjectValue=1,Vector3Value=1,
+    CFrameValue=1,Color3Value=1,RayValue=1,
+}
+
+-- ══════════════════════════════════════════════════════════════
+--                          GUI
+-- ══════════════════════════════════════════════════════════════
+if CoreGui:FindFirstChild("SIP_Fast") then
+    CoreGui:FindFirstChild("SIP_Fast"):Destroy()
+end
+
+local sg = Instance.new("ScreenGui")
+sg.Name, sg.ResetOnSpawn, sg.DisplayOrder, sg.ZIndexBehavior =
+    "SIP_Fast", false, 999, Enum.ZIndexBehavior.Sibling
+sg.Parent = CoreGui
+
+-- janela
+local win = Instance.new("Frame")
+win.Size     = UDim2.new(0, 420, 0, 500)
+win.Position = UDim2.new(0.5,-210, 0.5,-250)
+win.BackgroundColor3 = Color3.fromRGB(8,6,18)
+win.BorderSizePixel  = 0
+win.ClipsDescendants = true
+win.Parent = sg
+Instance.new("UICorner",win).CornerRadius = UDim.new(0,14)
+local ws = Instance.new("UIStroke",win)
+ws.Color, ws.Thickness = Color3.fromRGB(80,40,220), 2
+
+local wg = Instance.new("UIGradient",win)
+wg.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(12,7,28)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(6,4,16)),
+})
+wg.Rotation = 120
+
+-- header
+local hdr = Instance.new("Frame",win)
+hdr.Size = UDim2.new(1,0,0,68)
+hdr.BackgroundColor3 = Color3.fromRGB(15,8,40)
+hdr.BorderSizePixel  = 0
+Instance.new("UICorner",hdr).CornerRadius = UDim.new(0,14)
+local hg = Instance.new("UIGradient",hdr)
+hg.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(70,30,200)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(130,50,255)),
+})
+hg.Rotation = 90
+
+local function lbl(parent, txt, size, color, pos, dim, align, font)
+    local l = Instance.new("TextLabel", parent)
+    l.Text = txt
+    l.TextSize = size
+    l.TextColor3 = color or Color3.new(1,1,1)
+    l.Position = pos
+    l.Size = dim
+    l.BackgroundTransparency = 1
+    l.Font = font or Enum.Font.GothamBold
+    l.TextXAlignment = align or Enum.TextXAlignment.Left
+    return l
+end
+
+lbl(hdr,"⚡",26,Color3.new(1,1,1),
+    UDim2.new(0,14,0.5,-14),UDim2.new(0,30,0,30))
+lbl(hdr,"SAVE INSTANCES  FAST",16,Color3.new(1,1,1),
+    UDim2.new(0,50,0,12),UDim2.new(1,-100,0,22))
+lbl(hdr,"Batch Engine • Parallel Mode",11,Color3.fromRGB(170,130,255),
+    UDim2.new(0,50,0,36),UDim2.new(1,-100,0,18),
+    Enum.TextXAlignment.Left, Enum.Font.Gotham)
+
+-- badge FAST
+local badge = Instance.new("TextLabel",hdr)
+badge.Size = UDim2.new(0,54,0,22)
+badge.Position = UDim2.new(1,-120,0.5,-11)
+badge.BackgroundColor3 = Color3.fromRGB(255,180,0)
+badge.Text = "⚡ FAST"
+badge.TextColor3 = Color3.fromRGB(30,20,0)
+badge.TextSize = 11
+badge.Font = Enum.Font.GothamBold
+badge.BorderSizePixel = 0
+Instance.new("UICorner",badge).CornerRadius = UDim.new(0,6)
+
+-- fechar
+local xbtn = Instance.new("TextButton",hdr)
+xbtn.Size = UDim2.new(0,30,0,30)
+xbtn.Position = UDim2.new(1,-42,0.5,-15)
+xbtn.BackgroundColor3 = Color3.fromRGB(190,35,70)
+xbtn.Text, xbtn.TextColor3 = "✕", Color3.new(1,1,1)
+xbtn.TextSize, xbtn.Font = 13, Enum.Font.GothamBold
+xbtn.BorderSizePixel = 0
+Instance.new("UICorner",xbtn).CornerRadius = UDim.new(0,8)
+xbtn.MouseButton1Click:Connect(function() sg:Destroy() end)
+
+-- ── Drag ──────────────────────────────────────────────────────
+do
+    local drag, di, ds, sp
+    hdr.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            drag=true; ds=i.Position; sp=win.Position
+            i.Changed:Connect(function()
+                if i.UserInputState==Enum.UserInputState.End then drag=false end
+            end)
+        end
+    end)
+    hdr.InputChanged:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseMovement
+        or i.UserInputType==Enum.UserInputType.Touch then di=i end
+    end)
+    game:GetService("UserInputService").InputChanged:Connect(function(i)
+        if i==di and drag then
+            local d=i.Position-ds
+            win.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y)
+        end
+    end)
+end
+
+-- ── 4 cards de stat ───────────────────────────────────────────
+local statValues = {}
+local cardY = {80, 128, 176, 224}
+local cardInfo = {
+    {"📜","Scripts",      Color3.fromRGB(130,90,255)},
+    {"📋","LocalScripts", Color3.fromRGB(80,160,255)},
+    {"🧩","ModuleScripts",Color3.fromRGB(200,100,255)},
+    {"📡","Remotes",      Color3.fromRGB(60,210,180)},
+}
+for i, info in ipairs(cardInfo) do
+    local c = Instance.new("Frame",win)
+    c.Size = UDim2.new(0.5,-18, 0, 40)
+    c.Position = UDim2.new((i-1)%2 * 0.5, (i-1)%2==0 and 12 or 6, 0, cardY[math.ceil(i/2)])
+    -- reposicionar em grid 2x2
+    local col = (i-1)%2
+    local row = math.floor((i-1)/2)
+    c.Position = UDim2.new(col*0.5, col==0 and 12 or 6, 0, 80 + row*48)
+    c.BackgroundColor3 = Color3.fromRGB(16,10,38)
+    c.BorderSizePixel = 0
+    Instance.new("UICorner",c).CornerRadius = UDim.new(0,10)
+    local cs2 = Instance.new("UIStroke",c)
+    cs2.Color, cs2.Thickness = info[3], 1
+
+    local ic = Instance.new("TextLabel",c)
+    ic.Size=UDim2.new(0,24,1,0); ic.Position=UDim2.new(0,8,0,0)
+    ic.BackgroundTransparency=1; ic.Text=info[1]
+    ic.TextSize=16; ic.Font=Enum.Font.Gotham
+
+    local nm = Instance.new("TextLabel",c)
+    nm.Size=UDim2.new(1,-36,0,16); nm.Position=UDim2.new(0,34,0,4)
+    nm.BackgroundTransparency=1; nm.Text=info[2]
+    nm.TextColor3=Color3.fromRGB(170,150,220)
+    nm.TextSize=10; nm.Font=Enum.Font.Gotham
+    nm.TextXAlignment=Enum.TextXAlignment.Left
+
+    local vl = Instance.new("TextLabel",c)
+    vl.Size=UDim2.new(1,-36,0,18); vl.Position=UDim2.new(0,34,0,20)
+    vl.BackgroundTransparency=1; vl.Text="—"
+    vl.TextColor3=info[3]; vl.TextSize=15; vl.Font=Enum.Font.GothamBold
+    vl.TextXAlignment=Enum.TextXAlignment.Left
+    statValues[i] = vl
+end
+
+-- ── Barra de progresso ────────────────────────────────────────
+local pbg = Instance.new("Frame",win)
+pbg.Size=UDim2.new(1,-24,0,24); pbg.Position=UDim2.new(0,12,0,184)
+pbg.BackgroundColor3=Color3.fromRGB(16,10,38)
+pbg.BorderSizePixel=0; pbg.ClipsDescendants=true
+Instance.new("UICorner",pbg).CornerRadius=UDim.new(0,10)
+
+local pbar = Instance.new("Frame",pbg)
+pbar.Size=UDim2.new(0,0,1,0)
+pbar.BackgroundColor3=Color3.fromRGB(90,50,220)
+pbar.BorderSizePixel=0
+Instance.new("UICorner",pbar).CornerRadius=UDim.new(0,10)
+local pbgrad = Instance.new("UIGradient",pbar)
+pbgrad.Color=ColorSequence.new({
+    ColorSequenceKeypoint.new(0,Color3.fromRGB(90,50,220)),
+    ColorSequenceKeypoint.new(0.5,Color3.fromRGB(150,70,255)),
+    ColorSequenceKeypoint.new(1,Color3.fromRGB(60,180,255)),
+})
+
+local pct_lbl = Instance.new("TextLabel",pbg)
+pct_lbl.Size=UDim2.new(1,0,1,0)
+pct_lbl.BackgroundTransparency=1
+pct_lbl.Text="0%"; pct_lbl.TextColor3=Color3.new(1,1,1)
+pct_lbl.TextSize=12; pct_lbl.Font=Enum.Font.GothamBold
+
+-- ── Status label ──────────────────────────────────────────────
+local stlbl = lbl(win,"Pronto. Clique em INICIAR.",11,
+    Color3.fromRGB(150,120,210),
+    UDim2.new(0,12,0,214),UDim2.new(1,-24,0,18),
+    Enum.TextXAlignment.Left, Enum.Font.Gotham)
+
+-- ── Velocímetro (items/seg) ───────────────────────────────────
+local speedlbl = lbl(win,"",11,Color3.fromRGB(80,200,140),
+    UDim2.new(0,12,0,232),UDim2.new(1,-24,0,16),
+    Enum.TextXAlignment.Left, Enum.Font.Code)
+
+-- ── Log ───────────────────────────────────────────────────────
+local logf = Instance.new("ScrollingFrame",win)
+logf.Size=UDim2.new(1,-24,0,88)
+logf.Position=UDim2.new(0,12,0,252)
+logf.BackgroundColor3=Color3.fromRGB(6,4,14)
+logf.BorderSizePixel=0
+logf.ScrollBarThickness=3
+logf.ScrollBarImageColor3=Color3.fromRGB(70,30,160)
+logf.CanvasSize=UDim2.new(0,0,0,0)
+Instance.new("UICorner",logf).CornerRadius=UDim.new(0,8)
+local logLayout=Instance.new("UIListLayout",logf)
+logLayout.SortOrder=Enum.SortOrder.LayoutOrder
+logLayout.Padding=UDim.new(0,2)
+local logN=0
+
+local function log(msg, col)
+    logN+=1
+    local l=Instance.new("TextLabel",logf)
+    l.Size=UDim2.new(1,-6,0,15)
+    l.BackgroundTransparency=1
+    l.Text="> "..msg
+    l.TextColor3=col or Color3.fromRGB(140,210,170)
+    l.TextSize=11; l.Font=Enum.Font.Code
+    l.TextXAlignment=Enum.TextXAlignment.Left
+    l.LayoutOrder=logN
+    logf.CanvasSize=UDim2.new(0,0,0,logLayout.AbsoluteContentSize.Y+8)
+    logf.CanvasPosition=Vector2.new(0,logf.CanvasSize.Y.Offset)
+end
+
+-- ── Botão ─────────────────────────────────────────────────────
+local btn = Instance.new("TextButton",win)
+btn.Size=UDim2.new(1,-24,0,46)
+btn.Position=UDim2.new(0,12,0,348)
+btn.BackgroundColor3=Color3.fromRGB(80,35,210)
+btn.Text="⚡  INICIAR SAVE  ⚡"
+btn.TextColor3=Color3.new(1,1,1)
+btn.TextSize=15; btn.Font=Enum.Font.GothamBold
+btn.BorderSizePixel=0; btn.AutoButtonColor=false
+Instance.new("UICorner",btn).CornerRadius=UDim.new(0,12)
+local bgrad=Instance.new("UIGradient",btn)
+bgrad.Color=ColorSequence.new({
+    ColorSequenceKeypoint.new(0,Color3.fromRGB(100,45,240)),
+    ColorSequenceKeypoint.new(1,Color3.fromRGB(50,150,255)),
+})
+bgrad.Rotation=90
+local bstroke=Instance.new("UIStroke",btn)
+bstroke.Color=Color3.fromRGB(130,70,255); bstroke.Thickness=1.5
+
+-- timer label
+local timelbl = lbl(win,"",12,Color3.fromRGB(200,200,200),
+    UDim2.new(0,12,0,400),UDim2.new(1,-24,0,20),
+    Enum.TextXAlignment.Center, Enum.Font.GothamBold)
+
+-- ══════════════════════════════════════════════════════════════
+--              FUNÇÕES UTILITÁRIAS
+-- ══════════════════════════════════════════════════════════════
+
+local function setProgress(p)
+    p = math.clamp(p,0,100)
+    pbar.Size = UDim2.new(p/100,0,1,0)
+    pct_lbl.Text = string.format("%.1f%%", p)
+end
+
+local function setStatus(s) stlbl.Text = s end
+
+local function sanitize(n)
+    return tostring(n):gsub('[\\/:*?"<>|%c]',"_")
+end
+
+local function fullPath(obj)
+    local t,cur={},obj
+    while cur and cur~=game do
+        table.insert(t,1,sanitize(cur.Name))
+        cur=cur.Parent
+    end
+    return table.concat(t,"/")
+end
+
+local function mkdirs()
+    if not canMakeDir then return end
+    for _,d in ipairs({ROOT,F_SCR,F_LOC,F_MOD}) do
+        pcall(makefolder,d)
+    end
+end
+
+local function tryDecomp(s)
+    if canDecomp then
+        local ok,src=pcall(decompile,s)
+        if ok and src and #src>4 then return src end
+    end
+    return ("-- [decompile indisponível]\n-- Path: "..fullPath(s).."\n")
+end
+
+local function safeWrite(path,content)
+    if canWrite then pcall(writefile,path,content) end
+end
+
+-- ── Batch processor assíncrono ────────────────────────────────
+-- Processa `list` em lotes de BATCH sem travar o thread principal
+-- callback(item) é chamado para cada item
+-- onProgress(done, total) é chamado após cada lote
+local function batchProcess(list, callback, onProgress)
+    local total = #list
+    local done  = 0
+    local t0    = os.clock()
+
+    for i = 1, total, BATCH do
+        local batchEnd = math.min(i + BATCH - 1, total)
+        for j = i, batchEnd do
+            callback(list[j])
+            done += 1
+        end
+        -- yield uma vez por lote (em vez de a cada item)
+        if onProgress then onProgress(done, total, t0) end
+        task.wait()   -- <-- único yield por lote
+    end
+end
+
+-- ══════════════════════════════════════════════════════════════
+--                     LÓGICA DE SAVE
+-- ══════════════════════════════════════════════════════════════
+local saving = false
+
+local function doSave()
+    if saving then return end
+    saving = true
+
+    btn.Text = "⏳  Salvando..."
+    btn.BackgroundColor3 = Color3.fromRGB(40,40,70)
+
+    log("⚡ Fast Engine iniciado", Color3.fromRGB(255,210,60))
+    setStatus("Varrendo instâncias...")
+    setProgress(0)
+    task.wait()
+
+    -- ── Coleta O(n) — uma única passagem em GetDescendants ─────
+    local t_scan = os.clock()
+
+    local scripts, locals, modules, remotes = {},{},{},{}
+    local remoteClasses = {
+        RemoteEvent=true, RemoteFunction=true,
+        UnreliableRemoteEvent=true,
+        BindableEvent=true, BindableFunction=true,
+    }
+
+    local ok, desc = pcall(function() return game:GetDescendants() end)
+    if ok then
+        for _, obj in ipairs(desc) do
+            local c = obj.ClassName
+            if SKIP[c] then
+                -- ignora
+            elseif c == "Script"       then scripts[#scripts+1]  = obj
+            elseif c == "LocalScript"  then locals[#locals+1]   = obj
+            elseif c == "ModuleScript" then modules[#modules+1]  = obj
+            elseif remoteClasses[c]    then remotes[#remotes+1]  = obj
+            end
+        end
+    end
+
+    local scan_ms = math.floor((os.clock()-t_scan)*1000)
+    log(string.format("Varredura: %dms | S:%d L:%d M:%d R:%d",
+        scan_ms, #scripts, #locals, #modules, #remotes),
+        Color3.fromRGB(100,220,255))
+
+    -- Atualiza cards
+    statValues[1].Text = tostring(#scripts)
+    statValues[2].Text = tostring(#locals)
+    statValues[3].Text = tostring(#modules)
+    statValues[4].Text = tostring(#remotes)
+
+    mkdirs()
+
+    local totalItems = #scripts + #locals + #modules + 1
+    local doneItems  = 0
+    local saveStart  = os.clock()
+    local lastSpeed  = 0
+
+    local function onProg(done, total, t0)
+        doneItems += (done - (doneItems % (total == 0 and 1 or total)))
+    end
+
+    -- Calcula progresso global
+    local globalDone = 0
+    local function prog(label)
+        globalDone += 1
+        local pct = 5 + (globalDone / totalItems) * 93  -- 5% base, 93% work, 2% final
+        setProgress(pct)
+        local elapsed = os.clock() - saveStart
+        local rate    = elapsed > 0 and (globalDone / elapsed) or 0
+        speedlbl.Text = string.format("%.0f items/seg  |  %ds decorridos", rate, math.floor(elapsed))
+        timelbl.Text  = string.format("Salvando %s...", label)
+    end
+
+    -- ── SCRIPTS ───────────────────────────────────────────────
+    setStatus("💾 Salvando Scripts...")
+    log("Salvando Scripts ("..#scripts..")...", Color3.fromRGB(180,140,255))
+
+    local dupCountS = {}
+    batchProcess(scripts, function(s)
+        local base = sanitize(s.Name)
+        dupCountS[base] = (dupCountS[base] or 0) + 1
+        local fname = dupCountS[base] > 1
+            and (base.."_"..dupCountS[base]..".lua")
+            or  (base..".lua")
+        safeWrite(F_SCR.."/"..fname, tryDecomp(s))
+        prog("Script/"..s.Name)
+    end, nil)
+
+    -- ── LOCALSCRIPTS ──────────────────────────────────────────
+    setStatus("💾 Salvando LocalScripts...")
+    log("Salvando LocalScripts ("..#locals..")...", Color3.fromRGB(130,180,255))
+
+    local dupCountL = {}
+    batchProcess(locals, function(s)
+        local base = sanitize(s.Name)
+        dupCountL[base] = (dupCountL[base] or 0) + 1
+        local fname = dupCountL[base] > 1
+            and (base.."_"..dupCountL[base]..".lua")
+            or  (base..".lua")
+        safeWrite(F_LOC.."/"..fname, tryDecomp(s))
+        prog("LocalScript/"..s.Name)
+    end, nil)
+
+    -- ── MODULESCRIPTS ─────────────────────────────────────────
+    setStatus("💾 Salvando ModuleScripts...")
+    log("Salvando ModuleScripts ("..#modules..")...", Color3.fromRGB(200,120,255))
+
+    local dupCountM = {}
+    batchProcess(modules, function(s)
+        local base = sanitize(s.Name)
+        dupCountM[base] = (dupCountM[base] or 0) + 1
+        local fname = dupCountM[base] > 1
+            and (base.."_"..dupCountM[base]..".lua")
+            or  (base..".lua")
+        safeWrite(F_MOD.."/"..fname, tryDecomp(s))
+        prog("Module/"..s.Name)
+    end, nil)
+
+    -- ── REMOTES (TXT único) ───────────────────────────────────
+    setStatus("📡 Compilando Remotes.txt...")
+    log("Compilando Remotes.txt...", Color3.fromRGB(60,220,180))
+
+    do
+        local groups = {
+            RemoteEvent={},RemoteFunction={},
+            UnreliableRemoteEvent={},
+            BindableEvent={},BindableFunction={},
+        }
+        local order = {
+            "RemoteEvent","RemoteFunction",
+            "UnreliableRemoteEvent","BindableEvent","BindableFunction"
+        }
+        for _, r in ipairs(remotes) do
+            local g = groups[r.ClassName]
+            if g then g[#g+1] = r end
+        end
+
+        -- Monta o TXT inteiro em memória antes de escrever (1 write = rápido)
+        local buf = {
+            "╔══════════════════════════════════════════════════════════════╗",
+            "║            SAVE INSTANCES FAST — Remotes.txt                ║",
+            "║  "..os.date("%d/%m/%Y %H:%M:%S").."                                    ║",
+            "╚══════════════════════════════════════════════════════════════╝",
+            "",
+            "Total: "..#remotes.." remote(s)",
+            string.rep("─",64),
+            "",
+        }
+        for _, typeName in ipairs(order) do
+            local g = groups[typeName]
+            if g and #g > 0 then
+                buf[#buf+1] = "▶ "..typeName.." ("..#g..")"
+                buf[#buf+1] = string.rep("─",40)
+                for _, r in ipairs(g) do
+                    buf[#buf+1] = "  • "..r.Name
+                    buf[#buf+1] = "    Path : "..fullPath(r)
+                    buf[#buf+1] = ""
+                end
+                buf[#buf+1] = ""
+            end
+        end
+        safeWrite(F_REM, table.concat(buf, "\n"))
+        prog("Remotes.txt")
+    end
+
+    -- ── Finalização ───────────────────────────────────────────
+    setProgress(100)
+    local elapsed = os.clock() - saveStart
+    local totalSaved = #scripts + #locals + #modules + #remotes
+
+    setStatus("✅ Concluído em "..string.format("%.1f",elapsed).."s")
+    speedlbl.Text = string.format(
+        "%.0f items/seg  |  Total: %d arquivos",
+        totalItems / elapsed, totalSaved
+    )
+    timelbl.Text = ""
+
+    log("══════════════════════════",  Color3.fromRGB(100,200,255))
+    log("✅ DONE em "..string.format("%.2f",elapsed).."s", Color3.fromRGB(60,255,120))
+    log("Scripts:  "..#scripts,  Color3.fromRGB(190,255,190))
+    log("Locals:   "..#locals,   Color3.fromRGB(190,255,190))
+    log("Modules:  "..#modules,  Color3.fromRGB(190,255,190))
+    log("Remotes:  "..#remotes,  Color3.fromRGB(190,255,190))
+    log("Pasta →   "..ROOT,      Color3.fromRGB(255,220,100))
+
+    btn.Text = "✅  SAVE CONCLUÍDO"
+    btn.BackgroundColor3 = Color3.fromRGB(25,140,70)
+
+    task.delay(4, function()
+        btn.Text = "⚡  INICIAR SAVE  ⚡"
+        btn.BackgroundColor3 = Color3.fromRGB(80,35,210)
+        saving = false
+    end)
+end
+
+-- hover
+btn.MouseEnter:Connect(function()
+    if not saving then btn.BackgroundColor3=Color3.fromRGB(100,50,240) end
+end)
+btn.MouseLeave:Connect(function()
+    if not saving then btn.BackgroundColor3=Color3.fromRGB(80,35,210) end
+end)
+btn.MouseButton1Click:Connect(function()
+    task.spawn(doSave)
+end)
+
+-- aviso executor
+if not canWrite then
+    log("⚠ writefile ausente — modo leitura", Color3.fromRGB(255,170,50))
+    setStatus("⚠ Executor limitado — arquivos não serão salvos")
+end
+if not canDecomp then
+    log("⚠ decompile ausente — fontes genéricas", Color3.fromRGB(255,200,60))
+end
+
+log("GUI pronta. Clique em INICIAR SAVE.", Color3.fromRGB(140,170,255))
