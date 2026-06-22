@@ -1,0 +1,769 @@
+-- Dex Explorer Mobile Enhanced - Based on Dark Dex Lite
+-- Objective: Enhance the existing Dark Dex Lite with requested mobile features
+
+local player = game.Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+-- Create main screen GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "DexExplorerEnhanced"
+screenGui.Parent = gethui and gethui() or playerGui
+screenGui.ResetOnSpawn = false
+screenGui.DisplayOrder = 1
+
+-- Main container frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Parent = screenGui
+mainFrame.Size = UDim2.new(0, 400, 0, 700)
+mainFrame.Position = UDim2.new(0.5, -200, 0.5, -350)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+mainFrame.BorderSizePixel = 0
+
+-- Title bar
+local dragBar = Instance.new("Frame")
+dragBar.Parent = mainFrame
+dragBar.Size = UDim2.new(1, 0, 0, 40)
+dragBar.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+dragBar.BorderSizePixel = 0
+dragBar.Position = UDim2.new(0, 0, 0, 0)
+
+local dragTitle = Instance.new("TextLabel")
+dragTitle.Parent = dragBar
+dragTitle.Size = UDim2.new(0.7, 0, 1, 0)
+dragTitle.BackgroundTransparency = 1
+dragTitle.Text = "Dex Explorer Enhanced"
+dragTitle.TextColor3 = Color3.fromRGB(200, 200, 210)
+dragTitle.TextSize = 16
+dragTitle.Font = Enum.Font.SourceSansBold
+dragTitle.TextXAlignment = Enum.TextXAlignment.Center
+dragTitle.BorderSizePixel = 0
+
+-- Close Button
+local closeButton = Instance.new("TextButton")
+closeButton.Parent = dragBar
+closeButton.Size = UDim2.new(0, 30, 0, 30)
+closeButton.Position = UDim2.new(1, -35, 0, 5)
+closeButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+closeButton.Text = "×"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.TextSize = 14
+closeButton.Font = Enum.Font.SourceSansBold
+closeButton.BorderSizePixel = 0
+
+-- Main content area
+local explorerFrame = Instance.new("Frame")
+explorerFrame.Parent = mainFrame
+explorerFrame.Size = UDim2.new(1, 0, 0.5, 0)
+explorerFrame.BackgroundTransparency = 1
+explorerFrame.Position = UDim2.new(0, 0, 0, 40)
+
+local scrollingFrame = Instance.new("ScrollingFrame")
+scrollingFrame.Parent = explorerFrame
+scrollingFrame.Position = UDim2.new(0, 0, 0, 0)
+scrollingFrame.Size = UDim2.new(1, 0, 1, 0)
+scrollingFrame.BackgroundTransparency = 1
+scrollingFrame.BorderSizePixel = 0
+scrollingFrame.ScrollBarThickness = 6
+scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 90)
+scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Parent = scrollingFrame
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 2)
+listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
+end)
+
+-- Details frame with tabs
+local detailsFrame = Instance.new("Frame")
+detailsFrame.Parent = mainFrame
+detailsFrame.Size = UDim2.new(1, 0, 0.5, -40)
+detailsFrame.Position = UDim2.new(0, 0, 0.5, 0)
+detailsFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+detailsFrame.BorderSizePixel = 0
+
+-- Tab container
+local tabContainer = Instance.new("Frame")
+tabContainer.Size = UDim2.new(1, 0, 0, 40)
+tabContainer.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+tabContainer.Parent = detailsFrame
+
+local propertiesTab = Instance.new("TextButton")
+propertiesTab.Size = UDim2.new(0, 100, 1, 0)
+propertiesTab.Position = UDim2.new(0, 0, 0, 0)
+propertiesTab.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+propertiesTab.Text = "Propriedades"
+propertiesTab.TextColor3 = Color3.fromRGB(220, 220, 220)
+propertiesTab.Font = Enum.Font.SourceSansBold
+propertiesTab.TextSize = 14
+propertiesTab.Parent = tabContainer
+
+local codeTab = Instance.new("TextButton")
+codeTab.Size = UDim2.new(0, 100, 1, 0)
+codeTab.Position = UDim2.new(0, 105, 0, 0)
+codeTab.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+codeTab.Text = "Código"
+codeTab.TextColor3 = Color3.fromRGB(220, 220, 220)
+codeTab.Font = Enum.Font.SourceSansBold
+codeTab.TextSize = 14
+codeTab.Parent = tabContainer
+
+local childrenTab = Instance.new("TextButton")
+childrenTab.Size = UDim2.new(0, 100, 1, 0)
+childrenTab.Position = UDim2.new(0, 210, 0, 0)
+childrenTab.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+childrenTab.Text = "Filhos"
+childrenTab.TextColor3 = Color3.fromRGB(220, 220, 220)
+codeTab.Font = Enum.Font.SourceSansBold
+childrenTab.TextSize = 14
+childrenTab.Parent = tabContainer
+
+-- Details content area
+local propertiesScrolling = Instance.new("ScrollingFrame")
+propertiesScrolling.Parent = detailsFrame
+propertiesScrolling.Position = UDim2.new(0, 0, 0, 40)
+propertiesScrolling.Size = UDim2.new(1, 0, 1, -80)
+propertiesScrolling.BackgroundTransparency = 1
+propertiesScrolling.BorderSizePixel = 0
+propertiesScrolling.ScrollBarThickness = 6
+propertiesScrolling.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 90)
+propertiesScrolling.CanvasSize = UDim2.new(0, 0, 0, 0)
+
+local propertiesLayout = Instance.new("UIListLayout")
+propertiesLayout.Parent = propertiesScrolling
+propertiesLayout.SortOrder = Enum.SortOrder.LayoutOrder
+propertiesLayout.Padding = UDim.new(0, 2)
+propertiesLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	propertiesScrolling.CanvasSize = UDim2.new(0, 0, 0, propertiesLayout.AbsoluteContentSize.Y)
+end)
+
+-- Button frame inside details
+local buttonFrame = Instance.new("Frame")
+buttonFrame.Size = UDim2.new(1, 0, 0, 40)
+buttonFrame.Position = UDim2.new(0, 0, 1, -40)
+buttonFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+buttonFrame.Parent = detailsFrame
+
+local copyNameButton = Instance.new("TextButton")
+copyNameButton.Size = UDim2.new(0, 120, 1, 0)
+copyNameButton.Position = UDim2.new(0, 0, 0, 0)
+copyNameButton.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+copyNameButton.Text = "Copiar Nome"
+copyNameButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+copyNameButton.Font = Enum.Font.SourceSansBold
+copyNameButton.TextSize = 14
+copyNameButton.Parent = buttonFrame
+
+local refreshButton = Instance.new("TextButton")
+refreshButton.Size = UDim2.new(0, 120, 1, 0)
+refreshButton.Position = UDim2.new(0, 130, 0, 0)
+refreshButton.BackgroundColor3 = Color3.fromRGB(100, 150, 70)
+refreshButton.Text = "Atualizar"
+refreshButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+refreshButton.Font = Enum.Font.SourceSansBold
+refreshButton.TextSize = 14
+refreshButton.Parent = buttonFrame
+
+-- Floating toggle button
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0, 60, 0, 60)
+toggleButton.Position = UDim2.new(1, -70, 1, -130)
+toggleButton.BackgroundColor3 = Color3.fromRGB(50, 50, 150)
+toggleButton.BackgroundTransparency = 0.2
+toggleButton.Text = "DEX"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.Font = Enum.Font.SourceSansBold
+toggleButton.TextSize = 18
+toggleButton.Parent = screenGui
+
+-- Global variables
+local selectedInstance = nil
+local selectedNode = nil
+local treeNodes = {}
+local longPressConnections = {}
+
+-- Function to get real name with bypass
+local function getRealName(instance)
+    -- Try different methods in order of priority
+    if instance.Name then
+        return instance.Name
+    end
+    
+    local realNameAttr = instance:GetAttribute("RealName")
+    if realNameAttr then
+        return realNameAttr
+    end
+    
+    local realNameChild = instance:FindFirstChild("RealName")
+    if realNameChild and realNameChild:IsA("StringValue") then
+        return realNameChild.Value
+    end
+    
+    local fullName = instance:GetFullName()
+    local parts = string.split(fullName, ".")
+    return parts[#parts] or "Unknown"
+end
+
+-- Function to copy text to clipboard (with fallback)
+local function copyToClipboard(text)
+    if setclipboard then
+        setclipboard(text)
+    else
+        -- Fallback: show in a temporary popup
+        local popup = Instance.new("Frame")
+        popup.Size = UDim2.new(0, 300, 0, 200)
+        popup.Position = UDim2.new(0.5, -150, 0.5, -100)
+        popup.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+        popup.Parent = screenGui
+        
+        local textbox = Instance.new("TextBox")
+        textbox.Size = UDim2.new(1, -20, 0, 100)
+        textbox.Position = UDim2.new(0, 10, 0, 10)
+        textbox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        textbox.TextColor3 = Color3.fromRGB(220, 220, 220)
+        textbox.Text = text
+        textbox.Font = Enum.Font.Code
+        textbox.TextSize = 12
+        textbox.MultiLine = true
+        textbox.ClearTextOnFocus = false
+        textbox.Parent = popup
+        
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1, -20, 0, 50)
+        label.Position = UDim2.new(0, 10, 0, 120)
+        label.BackgroundTransparency = 1
+        label.Text = "Texto copiado. Selecione e copie manualmente."
+        label.TextColor3 = Color3.fromRGB(220, 220, 220)
+        label.Font = Enum.Font.Gotham
+        label.TextSize = 14
+        label.Parent = popup
+        
+        wait(5) -- Show for 5 seconds
+        popup:Destroy()
+    end
+end
+
+-- Function to decompile script with multiple fallbacks
+local function decompileScript(scriptInstance)
+    local success, result = pcall(function()
+        -- Try different decompilers based on executor
+        if syn and syn.crypt and syn.crypt.decompile then
+            return syn.crypt.decompile(scriptInstance.Source)
+        elseif decompile then
+            return decompile(scriptInstance)
+        elseif getscriptbytecode then
+            local bytecode = getscriptbytecode(scriptInstance)
+            if bytecode then
+                -- Attempt to convert bytecode to source (this is a simplified version)
+                return "-- Decompiled bytecode\n" .. tostring(bytecode):sub(1, 1000) .. "\n-- [Bytecode truncated]"
+            end
+        end
+        return nil
+    end)
+    
+    if success and result and result ~= "" then
+        return result
+    else
+        return nil
+    end
+end
+
+-- Function to get all descendants recursively
+local function getAllDescendants(instance, indentLevel)
+    indentLevel = indentLevel or 0
+    local result = {}
+    local indent = string.rep("  ", indentLevel)
+    
+    table.insert(result, indent .. instance.Name .. " (" .. instance.ClassName .. ")")
+    
+    for _, child in pairs(instance:GetChildren()) do
+        table.insert(result, getAllDescendants(child, indentLevel + 1))
+    end
+    
+    return table.concat(result, "\n")
+end
+
+-- Get class icons
+local defaultIcon = "rbxasset://textures/StudioIcon.png"
+local function getClassIcon(className)
+	local iconMap = {
+		["Part"] = "rbxasset://textures/ClassImages.png",
+		["Camera"] = "rbxasset://textures/ClassImages.png",
+		["Terrain"] = "rbxasset://textures/ClassImages.png",
+		["Model"] = "rbxasset://textures/ClassImages.png",
+		["Workspace"] = "rbxasset://textures/ClassImages.png",
+		["StarterGui"] = "rbxasset://textures/ClassImages.png",
+		["ReplicatedStorage"] = "rbxasset://textures/ClassImages.png",
+		["CoreGui"] = "rbxasset://textures/ClassImages.png",
+		["Lighting"] = "rbxasset://textures/ClassImages.png",
+		["LocalScript"] = "rbxasset://textures/ClassImages.png",
+		["Script"] = "rbxasset://textures/ClassImages.png",
+		["ModuleScript"] = "rbxasset://textures/ClassImages.png",
+		["Humanoid"] = "rbxasset://textures/ClassImages.png",
+		["Accessory"] = "rbxasset://textures/ClassImages.png",
+		["BodyColors"] = "rbxasset://textures/ClassImages.png",
+		["Pants"] = "rbxasset://textures/ClassImages.png",
+		["Shirt"] = "rbxasset://textures/ClassImages.png",
+		["ScreenGui"] = "rbxasset://textures/ClassImages.png",
+		["Folder"] = "rbxasset://textures/ClassImages.png",
+		["Players"] = "rbxasset://textures/ClassImages.png",
+	}
+	return iconMap[className] or defaultIcon
+end
+
+local function getClassIconOffset(className)
+	local offsets = {
+		["Part"] = Vector2.new(16, 0),
+		["Camera"] = Vector2.new(80, 0),
+		["Terrain"] = Vector2.new(176, 0),
+		["Model"] = Vector2.new(48, 0),
+		["Workspace"] = Vector2.new(64, 0),
+		["StarterGui"] = Vector2.new(128, 0),
+		["ReplicatedStorage"] = Vector2.new(144, 0),
+		["CoreGui"] = Vector2.new(144, 0),
+		["Lighting"] = Vector2.new(112, 0),
+		["LocalScript"] = Vector2.new(96, 0),
+		["Script"] = Vector2.new(80, 0),
+		["ModuleScript"] = Vector2.new(80, 0),
+		["Humanoid"] = Vector2.new(240, 0),
+		["Accessory"] = Vector2.new(320, 0),
+		["BodyColors"] = Vector2.new(288, 0),
+		["Pants"] = Vector2.new(208, 0),
+		["Shirt"] = Vector2.new(192, 0),
+		["ScreenGui"] = Vector2.new(0, 16),
+		["Folder"] = Vector2.new(0, 32),
+		["Players"] = Vector2.new(160, 0),
+	}
+	return offsets[className] or Vector2.new(0, 0)
+end
+
+-- Function to update properties display
+local function updateProperties()
+	for _, child in ipairs(propertiesScrolling:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+	
+	if not selectedInstance then
+		return
+	end
+	
+	local commonProperties = {
+		"Name", "ClassName", "Parent", "Position", "Size", "Transparency", "Color", "Material",
+		"Enabled", "Visible", "Anchored", "CanCollide", "Locked", "Orientation", "Rotation",
+		"Scale", "Reflectance", "BrickColor", "Shape", "CastShadow", "CollisionGroup",
+		"Mass", "Velocity", "AngularVelocity", "AssemblyAngularVelocity", "AssemblyLinearVelocity",
+		"AssemblyMass", "AssemblyRootPart", "PivotOffset", "WorldPivot", "CFrame",
+		"BackgroundColor3", "BackgroundTransparency", "BorderColor3", "BorderSizePixel",
+		"ZIndex", "Active", "AutoLocalize", "ClipsDescendants", "Draggable", "Selectable",
+		"Text", "TextColor3", "TextSize", "Font", "TextWrapped", "TextXAlignment", "TextYAlignment"
+	}
+	
+	for _, propName in ipairs(commonProperties) do
+		local row = Instance.new("Frame")
+		row.Parent = propertiesScrolling
+		row.Size = UDim2.new(1, 0, 0, 25)
+		row.BackgroundTransparency = 1
+		
+		local propLabel = Instance.new("TextLabel")
+		propLabel.Parent = row
+		propLabel.Size = UDim2.new(0.5, 0, 1, 0)
+		propLabel.BackgroundTransparency = 1
+		propLabel.Text = propName
+		propLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
+		propLabel.TextSize = 14
+		propLabel.Font = Enum.Font.SourceSans
+		propLabel.TextXAlignment = Enum.TextXAlignment.Left
+		propLabel.BorderSizePixel = 0
+		
+		local valueBox
+		local success, value = pcall(function()
+			return selectedInstance[propName]
+		end)
+		if not success then
+			value = "Error"
+		end
+		
+		if typeof(value) == "boolean" then
+			valueBox = Instance.new("TextButton")
+			valueBox.Text = value and "✔" or "✖"
+			valueBox.TextColor3 = value and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(200, 0, 0)
+			valueBox.MouseButton1Click:Connect(function()
+				selectedInstance[propName] = not value
+				updateProperties()
+			end)
+		elseif typeof(value) == "string" or typeof(value) == "number" then
+			valueBox = Instance.new("TextBox")
+			valueBox.Text = tostring(value)
+			valueBox.TextColor3 = Color3.fromRGB(200, 200, 210)
+			valueBox.TextSize = 14
+			valueBox.Font = Enum.Font.SourceSans
+			valueBox.TextXAlignment = Enum.TextXAlignment.Left
+			valueBox.BorderSizePixel = 0
+			if propName == "Name" then
+				valueBox.FocusLost:Connect(function(enterPressed)
+					if enterPressed then
+						selectedInstance.Name = valueBox.Text
+						updateProperties()
+					end
+				end)
+			end
+		else
+			valueBox = Instance.new("TextLabel")
+			valueBox.Text = tostring(value)
+			valueBox.TextColor3 = Color3.fromRGB(200, 200, 210)
+			valueBox.TextSize = 14
+			valueBox.Font = Enum.Font.SourceSans
+			valueBox.TextXAlignment = Enum.TextXAlignment.Left
+		end
+		valueBox.Parent = row
+		valueBox.Position = UDim2.new(0.5, 0, 0, 0)
+		valueBox.Size = UDim2.new(0.5, 0, 1, 0)
+		valueBox.BackgroundTransparency = 1
+		valueBox.BorderSizePixel = 0
+	end
+end
+
+-- Function to update code display
+local function updateCodeDisplay()
+	-- Clear existing content except buttons
+	for _, child in pairs(propertiesScrolling:GetChildren()) do
+		if child.Name ~= "ButtonFrame" then
+			child:Destroy()
+		end
+	end
+	
+	if selectedInstance and (selectedInstance:IsA("Script") or selectedInstance:IsA("LocalScript") or selectedInstance:IsA("ModuleScript")) then
+		local code = decompileScript(selectedInstance)
+		
+		if code then
+			local codeBox = Instance.new("TextBox")
+			codeBox.Size = UDim2.new(1, -20, 1, -20)
+			codeBox.Position = UDim2.new(0, 10, 0, 10)
+			codeBox.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+			codeBox.TextColor3 = Color3.fromRGB(220, 220, 220)
+			codeBox.Font = Enum.Font.Code
+			codeBox.TextSize = 12
+			codeBox.Text = code
+			codeBox.MultiLine = true
+			codeBox.ClearTextOnFocus = false
+			codeBox.Parent = propertiesScrolling
+		else
+			local protectedLabel = Instance.new("TextLabel")
+			protectedLabel.Size = UDim2.new(1, -20, 0, 50)
+			protectedLabel.Position = UDim2.new(0, 10, 0, 10)
+			protectedLabel.BackgroundTransparency = 1
+			protectedLabel.Text = "Script protegido - não foi possível descompilar"
+			protectedLabel.TextColor3 = Color3.fromRGB(220, 100, 100)
+			protectedLabel.Font = Enum.Font.Gotham
+			protectedLabel.TextSize = 14
+			protectedLabel.Parent = propertiesScrolling
+		end
+	else
+		local noScriptLabel = Instance.new("TextLabel")
+		noScriptLabel.Size = UDim2.new(1, -20, 0, 50)
+		noScriptLabel.Position = UDim2.new(0, 10, 0, 10)
+		noScriptLabel.BackgroundTransparency = 1
+		noScriptLabel.Text = "Selecione um script para ver o código"
+		noScriptLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+		noScriptLabel.Font = Enum.Font.Gotham
+		noScriptLabel.TextSize = 14
+		noScriptLabel.Parent = propertiesScrolling
+	end
+end
+
+-- Function to update children display
+local function updateChildrenDisplay()
+	-- Clear existing content except buttons
+	for _, child in pairs(propertiesScrolling:GetChildren()) do
+		if child.Name ~= "ButtonFrame" then
+			child:Destroy()
+		end
+	end
+	
+	if selectedInstance then
+		local childrenText = Instance.new("TextLabel")
+		childrenText.Size = UDim2.new(1, -20, 1, 0)
+		childrenText.Position = UDim2.new(0, 10, 0, 10)
+		childrenText.BackgroundTransparency = 1
+		childrenText.TextWrapped = true
+		childrenText.TextColor3 = Color3.fromRGB(220, 220, 220)
+		childrenText.Font = Enum.Font.Code
+		childrenText.TextSize = 12
+		childrenText.Text = getAllDescendants(selectedInstance, 0)
+		childrenText.Parent = propertiesScrolling
+	end
+end
+
+-- Function to create tree node
+local function createNode(instance, parentContainer, depth, parentUpdate)
+	depth = depth or 0
+	parentUpdate = parentUpdate or function() end
+	
+	local nodeFrame = Instance.new("Frame")
+	nodeFrame.Parent = parentContainer
+	nodeFrame.Size = UDim2.new(1, 0, 0, 30)
+	nodeFrame.BackgroundTransparency = 1
+	nodeFrame.BorderSizePixel = 0
+	
+	local highlight = Instance.new("Frame")
+	highlight.Name = "Highlight"
+	highlight.Parent = nodeFrame
+	highlight.Size = UDim2.new(1, 0, 1, 0)
+	highlight.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+	highlight.BackgroundTransparency = 1
+	highlight.ZIndex = 0
+	
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, depth * 15 + 5)
+	padding.Parent = nodeFrame
+	
+	local contentFrame = Instance.new("TextButton")
+	contentFrame.Parent = nodeFrame
+	contentFrame.Size = UDim2.new(1, 0, 0, 30)
+	contentFrame.BackgroundTransparency = 1
+	contentFrame.Text = ""
+	contentFrame.ZIndex = 1
+	contentFrame.AutoButtonColor = false
+	
+	local uiLayout = Instance.new("UIListLayout")
+	uiLayout.Parent = contentFrame
+	uiLayout.FillDirection = Enum.FillDirection.Horizontal
+	uiLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	uiLayout.Padding = UDim.new(0, 2)
+	uiLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	
+	local expandButton = Instance.new("TextButton")
+	expandButton.Parent = contentFrame
+	expandButton.Size = UDim2.new(0, 20, 0, 20)
+	expandButton.BackgroundTransparency = 1
+	expandButton.TextColor3 = Color3.fromRGB(200, 200, 210)
+	expandButton.Text = "▶"
+	expandButton.Font = Enum.Font.SourceSansBold
+	expandButton.TextSize = 12
+	expandButton.BorderSizePixel = 0
+	
+	local iconLabel = Instance.new("ImageLabel")
+	iconLabel.Parent = contentFrame
+	iconLabel.Size = UDim2.new(0, 20, 0, 20)
+	iconLabel.BackgroundTransparency = 1
+	local iconAsset = getClassIcon(instance.ClassName)
+	iconLabel.Image = iconAsset
+	if iconAsset == "rbxasset://textures/ClassImages.png" then
+		iconLabel.ImageRectSize = Vector2.new(16, 16)
+		iconLabel.ImageRectOffset = getClassIconOffset(instance.ClassName)
+	end
+	
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Parent = contentFrame
+	nameLabel.Size = UDim2.new(1, -43, 1, 0)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = instance.Name
+	nameLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
+	nameLabel.TextSize = 14
+	nameLabel.Font = Enum.Font.SourceSans
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.TextTruncate = Enum.TextTruncate.SplitWord
+	
+	local childrenContainer = Instance.new("Frame")
+	childrenContainer.Parent = nodeFrame
+	childrenContainer.Position = UDim2.new(0, 0, 0, 30)
+	childrenContainer.Size = UDim2.new(1, 0, 0, 0)
+	childrenContainer.BackgroundTransparency = 1
+	childrenContainer.Visible = false
+	
+	local childrenLayout = Instance.new("UIListLayout")
+	childrenLayout.Parent = childrenContainer
+	childrenLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	childrenLayout.Padding = UDim.new(0, 2)
+	
+	local expanded = false
+	local loaded = false
+	
+	local function updateNodeSize()
+		local height = 30
+		if expanded then
+			height = height + childrenLayout.AbsoluteContentSize.Y
+		end
+		nodeFrame.Size = UDim2.new(1, 0, 0, height)
+		parentUpdate()
+	end
+	
+	childrenLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateNodeSize)
+	
+	-- Selection handler
+	contentFrame.MouseButton1Click:Connect(function()
+		if selectedNode then
+			local prevHighlight = selectedNode:FindFirstChild("Highlight")
+			if prevHighlight then
+				prevHighlight.BackgroundTransparency = 1
+			end
+		end
+		highlight.BackgroundTransparency = 0.5
+		selectedNode = nodeFrame
+		selectedInstance = instance
+		updateProperties()
+	end)
+	
+	-- Long press simulation for mobile
+	local touchStart = nil
+	local touchConnection = nil
+	local longPressTimer = nil
+	
+	contentFrame.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then
+			touchStart = tick()
+			
+			longPressTimer = spawn(function()
+				wait(1) -- 1 second long press
+				if tick() - touchStart >= 1 then
+					-- Long press action: copy descendants
+					local descendantsText = getAllDescendants(instance, 0)
+					copyToClipboard(descendantsText)
+				end
+			end)
+		end
+	end)
+	
+	contentFrame.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then
+			if longPressTimer then
+				longPressTimer = nil
+			end
+		end
+	end)
+	
+	-- Expand/collapse handler
+	expandButton.MouseButton1Click:Connect(function()
+		expanded = not expanded
+		childrenContainer.Visible = expanded
+		expandButton.Text = expanded and "▼" or "▶"
+		if expanded and not loaded then
+			loaded = true
+			local children = instance:GetChildren()
+			table.sort(children, function(a, b)
+				return a.Name < b.Name
+			end)
+			for _, child in ipairs(children) do
+				createNode(child, childrenContainer, depth + 1, updateNodeSize)
+			end
+		end
+		updateNodeSize()
+	end)
+	
+	if #instance:GetChildren() == 0 then
+		expandButton.Visible = false
+		nameLabel.Size = UDim2.new(1, -23, 1, 0)
+	end
+	
+	return nodeFrame
+end
+
+-- Populate tree with root instances
+local services = {
+	game.Workspace,
+	game.Players,
+	game.Lighting,
+	game.ReplicatedStorage,
+	game.StarterGui,
+	game.SoundService,
+	game.StarterPlayer
+}
+
+table.sort(services, function(a, b)
+	return a.Name < b.Name
+end)
+
+for _, service in ipairs(services) do
+	createNode(service, scrollingFrame, 0, function()
+		listLayout:ApplyLayout()
+	end)
+end
+
+-- Event handlers
+closeButton.MouseButton1Click:Connect(function()
+	screenGui:Destroy()
+end)
+
+toggleButton.MouseButton1Click:Connect(function()
+	mainFrame.Visible = not mainFrame.Visible
+end)
+
+copyNameButton.MouseButton1Click:Connect(function()
+	if selectedInstance then
+		local realName = getRealName(selectedInstance)
+		copyToClipboard(realName)
+	end
+end)
+
+refreshButton.MouseButton1Click:Connect(function()
+	-- Recreate the entire tree
+	for _, child in pairs(scrollingFrame:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+	
+	for _, service in ipairs(services) do
+		createNode(service, scrollingFrame, 0, function()
+			listLayout:ApplyLayout()
+		end)
+	end
+end)
+
+-- Tab switching
+propertiesTab.MouseButton1Click:Connect(function()
+	updateProperties()
+end)
+
+codeTab.MouseButton1Click:Connect(function()
+	updateCodeDisplay()
+end)
+
+childrenTab.MouseButton1Click:Connect(function()
+	updateChildrenDisplay()
+end)
+
+-- Initial property load
+updateProperties()
+
+-- Draggable functionality for main frame
+local dragging
+local dragInput
+local dragStart
+local startPos
+
+dragBar.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragStart = input.Position
+		startPos = mainFrame.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+dragBar.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		local delta = input.Position - dragStart
+		mainFrame.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		)
+	end
+end)
