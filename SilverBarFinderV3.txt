@@ -1,0 +1,667 @@
+-- Auto Silver Bar Finder & Remote Executor v3
+-- Busca + Territorio simultaneos | Log de atividade | Mobile
+
+local Players = game:GetService('Players')
+local ReplicatedStorage = game:GetService('ReplicatedStorage')
+local Workspace = game:GetService('Workspace')
+local TweenService = game:GetService('TweenService')
+local CoreGui = game:GetService('CoreGui')
+local RunService = game:GetService('RunService')
+local HttpService = game:GetService('HttpService')
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild('PlayerGui')
+
+-- ============================================
+-- CONFIGURACOES
+-- ============================================
+local CONFIG = {
+    ITEM_NAME = 'silver_bar',
+    SEARCH_INTERVAL = 0.5,
+    TERRITORY_INTERVAL = 0.5,
+    MAX_SEARCH_TIME = 600,
+    REMOTE_PATH = {'Shared', 'Universe', 'Network', 'RemoteEvent', 'Store'},
+    ID_ATTRIBUTES = {'entity_client', 'entity_server', 'serverEntity', 'ServerEntityId'},
+    COLORS = {
+        background = Color3.fromRGB(18, 18, 20),
+        panel = Color3.fromRGB(28, 28, 32),
+        button = Color3.fromRGB(45, 45, 50),
+        buttonHover = Color3.fromRGB(65, 65, 70),
+        text = Color3.fromRGB(230, 230, 235),
+        accent = Color3.fromRGB(0, 170, 255),
+        success = Color3.fromRGB(0, 255, 100),
+        error = Color3.fromRGB(255, 60, 60),
+        warning = Color3.fromRGB(255, 180, 0),
+        active = Color3.fromRGB(0, 220, 90),
+        inactive = Color3.fromRGB(220, 60, 60),
+        info = Color3.fromRGB(150, 150, 155)
+    }
+}
+
+-- ============================================
+-- ESTADO
+-- ============================================
+local State = {
+    isRunning = false,
+    isGuiOpen = true,
+    foundItem = nil,
+    itemId = nil,
+    searchStartTime = 0,
+    itemsChecked = 0,
+    locationsSearched = {},
+    searchThread = nil,
+    territoryThread = nil,
+    streamingBypassActive = false,
+    logMessages = {}
+}
+
+-- ============================================
+-- FUNCAO: LOG
+-- ============================================
+local function addLog(msg, color)
+    local entry = {
+        text = '[' .. os.date('%H:%M:%S') .. '] ' .. msg,
+        color = color or CONFIG.COLORS.text
+    }
+    table.insert(State.logMessages, 1, entry)
+    if #State.logMessages > 50 then table.remove(State.logMessages) end
+end
+
+-- ============================================
+-- FUNCAO: CRIAR GUI PRINCIPAL
+-- ============================================
+local function createGUI()
+    local screenGui = Instance.new('ScreenGui')
+    screenGui.Name = 'SilverBarFinderV3'
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    
+    pcall(function() screenGui.Parent = CoreGui end)
+    if not screenGui.Parent then screenGui.Parent = PlayerGui end
+    
+    -- Frame principal (200x210, centralizado)
+    local mainFrame = Instance.new('Frame')
+    mainFrame.Name = 'MainFrame'
+    mainFrame.Size = UDim2.new(0, 210, 0, 210)
+    mainFrame.Position = UDim2.new(0.5, -105, 0.5, -105)
+    mainFrame.BackgroundColor3 = CONFIG.COLORS.background
+    mainFrame.BorderSizePixel = 0
+    mainFrame.BackgroundTransparency = 0.05
+    mainFrame.Parent = screenGui
+    
+    Instance.new('UICorner', mainFrame).CornerRadius = UDim.new(0, 10)
+    
+    local stroke = Instance.new('UIStroke', mainFrame)
+    stroke.Color = CONFIG.COLORS.accent
+    stroke.Thickness = 1.5
+    
+    -- Titulo
+    local title = Instance.new('TextLabel', mainFrame)
+    title.Name = 'Title'
+    title.Size = UDim2.new(1, -30, 0, 22)
+    title.Position = UDim2.new(0, 8, 0, 4)
+    title.BackgroundTransparency = 1
+    title.Text = 'Silver Bar Finder'
+    title.TextColor3 = CONFIG.COLORS.accent
+    title.TextSize = 13
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    
+    -- Minimizar
+    local minBtn = Instance.new('TextButton', mainFrame)
+    minBtn.Size = UDim2.new(0, 22, 0, 22)
+    minBtn.Position = UDim2.new(1, -26, 0, 4)
+    minBtn.BackgroundTransparency = 1
+    minBtn.Text = '-'
+    minBtn.TextColor3 = CONFIG.COLORS.text
+    minBtn.TextSize = 16
+    minBtn.Font = Enum.Font.GothamBold
+    
+    -- Status principal
+    local statusLabel = Instance.new('TextLabel', mainFrame)
+    statusLabel.Name = 'Status'
+    statusLabel.Size = UDim2.new(1, -16, 0, 18)
+    statusLabel.Position = UDim2.new(0, 8, 0, 26)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = 'Parado'
+    statusLabel.TextColor3 = CONFIG.COLORS.inactive
+    statusLabel.TextSize = 11
+    statusLabel.Font = Enum.Font.GothamBold
+    statusLabel.TextWrapped = true
+    
+    -- Painel de estatisticas
+    local statsFrame = Instance.new('Frame', mainFrame)
+    statsFrame.Name = 'StatsFrame'
+    statsFrame.Size = UDim2.new(1, -16, 0, 52)
+    statsFrame.Position = UDim2.new(0, 8, 0, 46)
+    statsFrame.BackgroundColor3 = CONFIG.COLORS.panel
+    statsFrame.BorderSizePixel = 0
+    Instance.new('UICorner', statsFrame).CornerRadius = UDim.new(0, 6)
+    
+    local statsLabel = Instance.new('TextLabel', statsFrame)
+    statsLabel.Name = 'StatsLabel'
+    statsLabel.Size = UDim2.new(1, -8, 1, -8)
+    statsLabel.Position = UDim2.new(0, 4, 0, 4)
+    statsLabel.BackgroundTransparency = 1
+    statsLabel.Text = 'Itens: 0 | Tempo: 0s | Locais: 0'
+    statsLabel.TextColor3 = CONFIG.COLORS.info
+    statsLabel.TextSize = 10
+    statsLabel.Font = Enum.Font.Gotham
+    statsLabel.TextWrapped = true
+    statsLabel.TextXAlignment = Enum.TextXAlignment.Left
+    statsLabel.TextYAlignment = Enum.TextYAlignment.Top
+    
+    -- Painel de log (scroll)
+    local logFrame = Instance.new('ScrollingFrame', mainFrame)
+    logFrame.Name = 'LogFrame'
+    logFrame.Size = UDim2.new(1, -16, 0, 50)
+    logFrame.Position = UDim2.new(0, 8, 0, 100)
+    logFrame.BackgroundColor3 = CONFIG.COLORS.panel
+    logFrame.BorderSizePixel = 0
+    logFrame.ScrollBarThickness = 2
+    logFrame.ScrollBarImageColor3 = CONFIG.COLORS.accent
+    logFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    Instance.new('UICorner', logFrame).CornerRadius = UDim.new(0, 6)
+    
+    local logLayout = Instance.new('UIListLayout', logFrame)
+    logLayout.Padding = UDim.new(0, 2)
+    logLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    
+    -- Botao INICIAR / PARAR
+    local searchBtn = Instance.new('TextButton', mainFrame)
+    searchBtn.Name = 'SearchBtn'
+    searchBtn.Size = UDim2.new(0.9, 0, 0, 26)
+    searchBtn.Position = UDim2.new(0.05, 0, 0, 154)
+    searchBtn.BackgroundColor3 = CONFIG.COLORS.button
+    searchBtn.Text = 'INICIAR BUSCA'
+    searchBtn.TextColor3 = CONFIG.COLORS.text
+    searchBtn.TextSize = 11
+    searchBtn.Font = Enum.Font.GothamBold
+    searchBtn.BorderSizePixel = 0
+    Instance.new('UICorner', searchBtn).CornerRadius = UDim.new(0, 6)
+    
+    -- Botao Fechar
+    local closeBtn = Instance.new('TextButton', mainFrame)
+    closeBtn.Name = 'CloseBtn'
+    closeBtn.Size = UDim2.new(0.9, 0, 0, 20)
+    closeBtn.Position = UDim2.new(0.05, 0, 0, 184)
+    closeBtn.BackgroundTransparency = 1
+    closeBtn.Text = 'Fechar Interface'
+    closeBtn.TextColor3 = Color3.fromRGB(100, 100, 105)
+    closeBtn.TextSize = 10
+    closeBtn.Font = Enum.Font.Gotham
+    
+    -- Draggable
+    local dragging, dragStart, startPos = false, nil, nil
+    mainFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true; dragStart = input.Position; startPos = mainFrame.Position
+        end
+    end)
+    mainFrame.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+            local delta = input.Position - dragStart
+            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    mainFrame.InputEnded:Connect(function() dragging = false end)
+    
+    -- Hover
+    local function addHover(btn)
+        btn.MouseEnter:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = CONFIG.COLORS.buttonHover}):Play()
+        end)
+        btn.MouseLeave:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = CONFIG.COLORS.button}):Play()
+        end)
+    end
+    addHover(searchBtn)
+    
+    return {
+        screenGui = screenGui,
+        mainFrame = mainFrame,
+        statusLabel = statusLabel,
+        statsLabel = statsLabel,
+        logFrame = logFrame,
+        logLayout = logLayout,
+        searchBtn = searchBtn,
+        closeBtn = closeBtn,
+        minBtn = minBtn,
+        title = title
+    }
+end
+
+-- ============================================
+-- FUNCAO: ATUALIZAR LOG NA INTERFACE
+-- ============================================
+local function updateLogDisplay(gui)
+    for _, child in pairs(gui.logFrame:GetChildren()) do
+        if child:IsA('TextLabel') then child:Destroy() end
+    end
+    
+    local totalHeight = 0
+    for i, entry in ipairs(State.logMessages) do
+        if i > 20 then break end
+        local label = Instance.new('TextLabel')
+        label.Size = UDim2.new(1, -8, 0, 14)
+        label.BackgroundTransparency = 1
+        label.Text = entry.text
+        label.TextColor3 = entry.color
+        label.TextSize = 9
+        label.Font = Enum.Font.Gotham
+        label.TextWrapped = true
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.Parent = gui.logFrame
+        totalHeight = totalHeight + 16
+    end
+    
+    gui.logFrame.CanvasSize = UDim2.new(0, 0, 0, totalHeight + 5)
+end
+
+-- ============================================
+-- FUNCAO: ATUALIZAR ESTATISTICAS
+-- ============================================
+local function updateStats(gui)
+    local elapsed = 0
+    if State.searchStartTime > 0 then
+        elapsed = math.floor(tick() - State.searchStartTime)
+    end
+    local locCount = 0
+    for _ in pairs(State.locationsSearched) do locCount = locCount + 1 end
+    gui.statsLabel.Text = 'Itens: ' .. State.itemsChecked .. ' | Tempo: ' .. elapsed .. 's | Locais: ' .. locCount
+end
+
+-- ============================================
+-- FUNCAO: TERRITORIO
+-- ============================================
+local function sendTerritoryRemote()
+    pcall(function()
+        local remote = ReplicatedStorage
+        for _, pathPart in ipairs(CONFIG.REMOTE_PATH) do
+            remote = remote:WaitForChild(pathPart, 1)
+        end
+        if remote and remote:IsA('RemoteEvent') then
+            remote:FireServer()
+        elseif remote and remote:IsA('RemoteFunction') then
+            remote:InvokeServer()
+        end
+    end)
+end
+
+local function startTerritoryBypass()
+    State.territoryThread = task.spawn(function()
+        while State.isRunning do
+            sendTerritoryRemote()
+            task.wait(CONFIG.TERRITORY_INTERVAL)
+        end
+    end)
+end
+
+-- ============================================
+-- FUNCAO: BYPASS STREAMING
+-- ============================================
+local function bypassStreaming()
+    if State.streamingBypassActive then return end
+    State.streamingBypassActive = true
+    addLog('Ativando bypass de streaming...', CONFIG.COLORS.warning)
+    
+    pcall(function()
+        if Workspace.StreamingEnabled then
+            for _, part in pairs(Workspace:GetDescendants()) do
+                if part:IsA('BasePart') then
+                    pcall(function() part.StreamingMode = Enum.StreamingMode.Persistent end)
+                end
+            end
+            Workspace.StreamingMinRadius = 100000
+            Workspace.StreamingTargetRadius = 100000
+        end
+    end)
+end
+
+-- ============================================
+-- FUNCAO: VERIFICAR ITEM
+-- ============================================
+local function isSilverBar(item)
+    if not item then return false end
+    local name = item.Name:lower()
+    if name == CONFIG.ITEM_NAME or (name:find('silver') and name:find('bar')) then
+        return true
+    end
+    pcall(function()
+        for _, attrValue in pairs(item:GetAttributes()) do
+            if type(attrValue) == 'string' then
+                local val = attrValue:lower()
+                if val == CONFIG.ITEM_NAME or (val:find('silver') and val:find('bar')) then
+                    return true
+                end
+            end
+        end
+    end)
+    return false
+end
+
+-- ============================================
+-- FUNCAO: EXTRAIR ID
+-- ============================================
+local function extractItemId(item)
+    if not item then return nil end
+    local foundId = nil
+    
+    for _, attrName in ipairs(CONFIG.ID_ATTRIBUTES) do
+        pcall(function()
+            local value = item:GetAttribute(attrName)
+            if value then
+                if type(value) == 'number' then foundId = value
+                elseif type(value) == 'string' then
+                    local num = tonumber(value)
+                    if num then foundId = num end
+                end
+            end
+        end)
+        if foundId then break end
+    end
+    
+    if not foundId then
+        pcall(function()
+            for _, child in pairs(item:GetDescendants()) do
+                if child:IsA('IntValue') or child:IsA('NumberValue') then
+                    local name = child.Name:lower()
+                    if name:find('id') or name:find('entity') or name:find('server') then
+                        foundId = child.Value; break
+                    end
+                end
+            end
+        end)
+    end
+    
+    return foundId
+end
+
+-- ============================================
+-- FUNCAO: BUSCAR ITEM
+-- ============================================
+local function searchForItem(gui)
+    local locations = {
+        {obj = Workspace, name = 'Workspace'},
+        {obj = ReplicatedStorage, name = 'ReplicatedStorage'},
+        {obj = LocalPlayer:FindFirstChild('Backpack'), name = 'Backpack'},
+        {obj = LocalPlayer:FindFirstChild('Character'), name = 'Character'},
+    }
+    
+    pcall(function()
+        local extras = {'Items', 'Drops', 'Loot', 'Assets', 'Storage', 'Inventory', 'Entities'}
+        for _, folderName in ipairs(extras) do
+            local ws = Workspace:FindFirstChild(folderName)
+            if ws then table.insert(locations, {obj = ws, name = 'Workspace.' .. folderName}) end
+            local rs = ReplicatedStorage:FindFirstChild(folderName)
+            if rs then table.insert(locations, {obj = rs, name = 'ReplicatedStorage.' .. folderName}) end
+        end
+    end)
+    
+    for _, loc in pairs(locations) do
+        if loc.obj then
+            State.locationsSearched[loc.name] = true
+            local desc = loc.obj:GetDescendants()
+            for _, item in pairs(desc) do
+                State.itemsChecked = State.itemsChecked + 1
+                if isSilverBar(item) then
+                    local id = extractItemId(item)
+                    if id then
+                        addLog('Item encontrado em: ' .. loc.name, CONFIG.COLORS.success)
+                        addLog('ID detectado: ' .. tostring(id), CONFIG.COLORS.accent)
+                        return item, id
+                    end
+                end
+            end
+        end
+    end
+    
+    bypassStreaming()
+    task.wait(0.2)
+    
+    for _, loc in pairs(locations) do
+        if loc.obj then
+            for _, item in pairs(loc.obj:GetDescendants()) do
+                State.itemsChecked = State.itemsChecked + 1
+                if isSilverBar(item) then
+                    local id = extractItemId(item)
+                    if id then
+                        addLog('Item encontrado (pos-bypass): ' .. loc.name, CONFIG.COLORS.success)
+                        return item, id
+                    end
+                end
+            end
+        end
+    end
+    
+    return nil, nil
+end
+
+-- ============================================
+-- FUNCAO: EXECUTAR REMOTE
+-- ============================================
+local function executeRemote(itemId)
+    if not itemId then return false end
+    local success = false
+    
+    pcall(function()
+        local remote = ReplicatedStorage
+        for _, pathPart in ipairs(CONFIG.REMOTE_PATH) do
+            remote = remote:WaitForChild(pathPart, 2)
+        end
+        if remote and remote:IsA('RemoteEvent') then
+            remote:FireServer(itemId)
+            success = true
+        elseif remote and remote:IsA('RemoteFunction') then
+            remote:InvokeServer(itemId)
+            success = true
+        end
+    end)
+    
+    if not success then
+        pcall(function()
+            for _, obj in pairs(ReplicatedStorage:GetDescendants()) do
+                if obj.Name == 'Store' and (obj:IsA('RemoteEvent') or obj:IsA('RemoteFunction')) then
+                    if obj:IsA('RemoteEvent') then obj:FireServer(itemId) else obj:InvokeServer(itemId) end
+                    success = true; break
+                end
+            end
+        end)
+    end
+    
+    if not success then
+        pcall(function()
+            for _, obj in pairs(ReplicatedStorage:GetDescendants()) do
+                local name = obj.Name:lower()
+                if (name:find('store') or name:find('sell') or name:find('trade')) and (obj:IsA('RemoteEvent') or obj:IsA('RemoteFunction')) then
+                    if obj:IsA('RemoteEvent') then obj:FireServer(itemId) else obj:InvokeServer(itemId) end
+                    success = true; break
+                end
+            end
+        end)
+    end
+    
+    return success
+end
+
+-- ============================================
+-- FUNCAO: LOOP PRINCIPAL
+-- ============================================
+local function startSearch(gui)
+    if State.isRunning then return end
+    State.isRunning = true
+    State.searchStartTime = tick()
+    State.itemsChecked = 0
+    State.locationsSearched = {}
+    State.logMessages = {}
+    State.streamingBypassActive = false
+    State.foundItem = nil
+    State.itemId = nil
+    
+    gui.searchBtn.Text = 'PARAR BUSCA'
+    gui.searchBtn.TextColor3 = CONFIG.COLORS.error
+    gui.statusLabel.Text = 'Buscando...'
+    gui.statusLabel.TextColor3 = CONFIG.COLORS.warning
+    
+    addLog('Busca iniciada!', CONFIG.COLORS.accent)
+    addLog('Territorio ativado (0.5s)', CONFIG.COLORS.warning)
+    updateLogDisplay(gui)
+    
+    -- Inicia territorio simultaneo
+    startTerritoryBypass()
+    
+    -- Atualiza stats a cada 0.5s
+    local statsThread = task.spawn(function()
+        while State.isRunning do
+            updateStats(gui)
+            task.wait(0.5)
+        end
+    end)
+    
+    -- Loop principal de busca
+    State.searchThread = task.spawn(function()
+        while State.isRunning do
+            if tick() - State.searchStartTime > CONFIG.MAX_SEARCH_TIME then
+                addLog('Tempo maximo excedido (10min)', CONFIG.COLORS.error)
+                gui.statusLabel.Text = 'Tempo excedido'
+                gui.statusLabel.TextColor3 = CONFIG.COLORS.error
+                stopSearch(gui)
+                break
+            end
+            
+            addLog('Procurando em todos os locais...', CONFIG.COLORS.info)
+            updateLogDisplay(gui)
+            
+            local item, id = searchForItem(gui)
+            
+            if item and id then
+                State.foundItem = item
+                State.itemId = id
+                
+                gui.statusLabel.Text = 'ID: ' .. tostring(id)
+                gui.statusLabel.TextColor3 = CONFIG.COLORS.success
+                addLog('Item encontrado! ID: ' .. tostring(id), CONFIG.COLORS.success)
+                updateLogDisplay(gui)
+                updateStats(gui)
+                
+                task.wait(0.5)
+                addLog('Executando remote...', CONFIG.COLORS.warning)
+                updateLogDisplay(gui)
+                
+                local executed = executeRemote(id)
+                
+                if executed then
+                    gui.statusLabel.Text = 'Sucesso! ID: ' .. tostring(id)
+                    gui.title.Text = 'Silver Bar - OK'
+                    gui.title.TextColor3 = CONFIG.COLORS.success
+                    addLog('REMOTE EXECUTADO COM SUCESSO!', CONFIG.COLORS.success)
+                    addLog('ID usado: ' .. tostring(id), CONFIG.COLORS.accent)
+                    
+                    pcall(function()
+                        if not getgenv().SilverBarIDs then getgenv().SilverBarIDs = {} end
+                        table.insert(getgenv().SilverBarIDs, {id = id, time = os.time(), item = item:GetFullName()})
+                    end)
+                else
+                    gui.statusLabel.Text = 'Erro no remote'
+                    gui.statusLabel.TextColor3 = CONFIG.COLORS.error
+                    addLog('FALHA ao executar remote!', CONFIG.COLORS.error)
+                end
+                
+                updateLogDisplay(gui)
+                updateStats(gui)
+                stopSearch(gui)
+                break
+            end
+            
+            addLog('Nao encontrado. Tentando novamente...', CONFIG.COLORS.info)
+            updateLogDisplay(gui)
+            updateStats(gui)
+            
+            task.wait(CONFIG.SEARCH_INTERVAL)
+        end
+    end)
+end
+
+local function stopSearch(gui)
+    State.isRunning = false
+    if State.searchThread then State.searchThread = nil end
+    if State.territoryThread then State.territoryThread = nil end
+    
+    gui.searchBtn.Text = 'INICIAR BUSCA'
+    gui.searchBtn.TextColor3 = CONFIG.COLORS.text
+    
+    if not State.foundItem then
+        gui.statusLabel.Text = 'Parado'
+        gui.statusLabel.TextColor3 = CONFIG.COLORS.inactive
+        addLog('Busca parada pelo usuario', CONFIG.COLORS.warning)
+    end
+    
+    updateLogDisplay(gui)
+    updateStats(gui)
+end
+
+-- ============================================
+-- INICIALIZACAO
+-- ============================================
+local function init()
+    pcall(function()
+        local old = PlayerGui:FindFirstChild('SilverBarFinderV3')
+        if old then old:Destroy() end
+    end)
+    pcall(function()
+        local old = CoreGui:FindFirstChild('SilverBarFinderV3')
+        if old then old:Destroy() end
+    end)
+    
+    task.wait(0.3)
+    
+    local gui = createGUI()
+    
+    -- Botao INICIAR / PARAR
+    gui.searchBtn.MouseButton1Click:Connect(function()
+        if State.isRunning then
+            stopSearch(gui)
+        else
+            startSearch(gui)
+        end
+    end)
+    
+    -- Botao Fechar GUI
+    gui.closeBtn.MouseButton1Click:Connect(function()
+        State.isRunning = false
+        gui.screenGui:Destroy()
+    end)
+    
+    -- Botao Minimizar
+    local minimized = false
+    gui.minBtn.MouseButton1Click:Connect(function()
+        if not minimized then
+            gui.mainFrame:TweenSize(UDim2.new(0, 210, 0, 30), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25, true)
+            for _, child in pairs(gui.mainFrame:GetChildren()) do
+                if child.Name ~= 'Title' and child.Name ~= 'MinBtn' then
+                    child.Visible = false
+                end
+            end
+            gui.minBtn.Text = '+'
+            minimized = true
+        else
+            gui.mainFrame:TweenSize(UDim2.new(0, 210, 0, 210), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25, true)
+            for _, child in pairs(gui.mainFrame:GetChildren()) do
+                child.Visible = true
+            end
+            gui.minBtn.Text = '-'
+            minimized = false
+        end
+    end)
+    
+    -- Notificacao
+    pcall(function()
+        game:GetService('StarterGui'):SetCore('SendNotification', {
+            Title = 'Silver Bar Finder v3',
+            Text = 'Pronto! Clique INICIAR BUSCA.',
+            Duration = 4
+        })
+    end)
+end
+
+init()
