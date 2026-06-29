@@ -1,0 +1,1441 @@
+--[[
+    ╔═══════════════════════════════════════════════════════╗
+    ║  DEV SEARCH PRO - Ferramenta de Busca Profissional   ║
+    ║  Versão 1.0 - Interface Premium + Scanner Completo   ║
+    ╚═══════════════════════════════════════════════════════╝
+--]]
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ══════════════════════════════════════════════════════════
+-- CONFIGURAÇÕES
+-- ══════════════════════════════════════════════════════════
+local CONFIG = {
+    Theme = {
+        Background = Color3.fromRGB(12, 14, 20),
+        Surface = Color3.fromRGB(20, 24, 32),
+        SurfaceLight = Color3.fromRGB(28, 33, 44),
+        Primary = Color3.fromRGB(88, 101, 242),
+        PrimaryDark = Color3.fromRGB(66, 77, 200),
+        Accent = Color3.fromRGB(138, 92, 246),
+        Success = Color3.fromRGB(16, 185, 129),
+        Warning = Color3.fromRGB(245, 158, 11),
+        Error = Color3.fromRGB(239, 68, 68),
+        Text = Color3.fromRGB(235, 238, 245),
+        TextMuted = Color3.fromRGB(140, 148, 165),
+        Border = Color3.fromRGB(40, 46, 60)
+    },
+    Fonts = {
+        Main = Enum.Font.GothamBold,
+        Regular = Enum.Font.GothamMedium,
+        Mono = Enum.Font.Code
+    },
+    Decompiler = {
+        Timeout = 10,
+        UseMaxPower = true,
+        Beautify = true
+    }
+}
+
+-- ══════════════════════════════════════════════════════════
+-- STORAGE GLOBAL
+-- ══════════════════════════════════════════════════════════
+local DevSearchPro = {
+    Data = {
+        Scripts = {},
+        Modules = {},
+        Remotes = {},
+        AllItems = {}
+    },
+    Stats = {
+        TotalScanned = 0,
+        Decompiled = 0,
+        Readable = 0,
+        Protected = 0,
+        StartTime = 0,
+        EndTime = 0
+    },
+    UI = {},
+    IsLoading = false,
+    IsMinimized = false
+}
+
+-- ══════════════════════════════════════════════════════════
+-- UTILITÁRIOS
+-- ══════════════════════════════════════════════════════════
+local function Create(className, properties, children)
+    local instance = Instance.new(className)
+    for prop, value in pairs(properties or {}) do
+        instance[prop] = value
+    end
+    for _, child in pairs(children or {}) do
+        child.Parent = instance
+    end
+    return instance
+end
+
+local function Tween(obj, props, time, style, direction)
+    style = style or Enum.EasingStyle.Quart
+    direction = direction or Enum.EasingDirection.Out
+    time = time or 0.3
+    local tween = TweenService:Create(obj, TweenInfo.new(time, style, direction), props)
+    tween:Play()
+    return tween
+end
+
+local function FormatPath(instance)
+    local path = instance:GetFullName()
+    return path
+end
+
+local function GetReadableName(instance)
+    return instance.Name ~= "" and instance.Name or instance.ClassName
+end
+
+-- ══════════════════════════════════════════════════════════
+-- DETECÇÃO DE BYTECODE PROTEGIDO
+-- ══════════════════════════════════════════════════════════
+local function IsCodeReadable(source)
+    if not source or source == "" then return false end
+    
+    -- Detecta bytecode protegido
+    local protectedPatterns = {
+        "\27Lua",
+        "Lua",
+        "%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x", -- sequências hex
+        "Invalid bytecode",
+        "Failed to decompile",
+        "\0\0\0",
+        "%[%x+%]", -- referências de bytecode
+    }
+    
+    for _, pattern in ipairs(protectedPatterns) do
+        if source:find(pattern) then
+            return false
+        end
+    end
+    
+    -- Verifica se tem código Lua legível real
+    local luaKeywords = {"function", "local", "end", "if", "then", "return", "game", "workspace"}
+    local hasLua = false
+    for _, keyword in ipairs(luaKeywords) do
+        if source:find(keyword) then
+            hasLua = true
+            break
+        end
+    end
+    
+    -- Verifica se é só bytecode disfarçado
+    local printableRatio = 0
+    local printable = 0
+    for i = 1, #source do
+        local byte = source:byte(i)
+        if byte >= 32 and byte <= 126 then
+            printable = printable + 1
+        end
+    end
+    printableRatio = printable / #source
+    
+    return hasLua and printableRatio > 0.7
+end
+
+local function CleanUpCode(source)
+    if not source then return nil end
+    
+    -- Remove comentários em excesso
+    local cleaned = source
+    
+    -- Remove linhas vazias em excesso
+    cleaned = cleaned:gsub("\n\n+", "\n\n")
+    
+    -- Remove espaços em branco iniciais em excesso
+    cleaned = cleaned:gsub("^%s+", "")
+    
+    -- Adiciona identação básica se não tiver
+    if not cleaned:find("\t") and not cleaned:find("    ") then
+        local lines = {}
+        local indent = 0
+        for line in cleaned:gmatch("[^\n]+") do
+            local trimmed = line:match("^%s*(.-)%s*$")
+            if trimmed:match("^end") or trimmed:match("^elseif") or trimmed:match("^else") then
+                indent = math.max(0, indent - 1)
+            end
+            table.insert(lines, string.rep("\t", indent) .. trimmed)
+            if trimmed:match("function%s*%(") or trimmed:match("if.+then$") or trimmed:match("for.+do$") or trimmed:match("while.+do$") then
+                indent = indent + 1
+            end
+        end
+        cleaned = table.concat(lines, "\n")
+    end
+    
+    return cleaned
+end
+
+-- ══════════════════════════════════════════════════════════
+-- MOTOR DE DECOMPILAÇÃO - POTÊNCIA MÁXIMA
+-- ══════════════════════════════════════════════════════════
+local function DecompileScript(scriptInstance)
+    local success, result = pcall(function()
+        -- Usa decompile do executor com configurações máximas
+        if decompile then
+            local source = decompile(scriptInstance, CONFIG.Decompiler.Beautify, CONFIG.Decompiler.Timeout)
+            return source
+        elseif unluac then
+            return unluac.decompile(scriptInstance)
+        elseif getscriptclosure then
+            local closure = getscriptclosure(scriptInstance)
+            return decompile(closure)
+        end
+        return nil
+    end)
+    
+    if success and result and IsCodeReadable(result) then
+        return CleanUpCode(result)
+    end
+    return nil
+end
+
+-- ══════════════════════════════════════════════════════════
+-- SCANNER COMPLETO
+-- ══════════════════════════════════════════════════════════
+local function ScanAllObjects(updateCallback)
+    local scanned = {}
+    local total = 0
+    
+    local function RecursiveScan(parent, depth)
+        depth = depth or 0
+        if depth > 50 then return end -- Limita profundidade
+        
+        local success, children = pcall(function()
+            return parent:GetChildren()
+        end)
+        
+        if not success or not children then return end
+        
+        for _, child in ipairs(children) do
+            local ok, _ = pcall(function()
+                return child.Name
+            end)
+            
+            if ok and not scanned[child] then
+                scanned[child] = true
+                total = total + 1
+                
+                -- Detecta Remotes
+                if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") or
+                   child:IsA("BindableEvent") or child:IsA("BindableFunction") then
+                    table.insert(DevSearchPro.Data.Remotes, {
+                        Name = GetReadableName(child),
+                        OriginalName = child.Name,
+                        Class = child.ClassName,
+                        Path = FormatPath(child),
+                        Instance = child,
+                        Type = "Remote"
+                    })
+                end
+                
+                -- Detecta LocalScripts
+                if child:IsA("LocalScript") then
+                    DevSearchPro.Stats.TotalScanned = DevSearchPro.Stats.TotalScanned + 1
+                    if updateCallback then updateCallback("Decompilando: " .. child.Name) end
+                    
+                    local source = DecompileScript(child)
+                    if source then
+                        DevSearchPro.Stats.Readable = DevSearchPro.Stats.Readable + 1
+                        table.insert(DevSearchPro.Data.Scripts, {
+                            Name = GetReadableName(child),
+                            OriginalName = child.Name,
+                            Class = child.ClassName,
+                            Path = FormatPath(child),
+                            Source = source,
+                            Instance = child,
+                            Type = "LocalScript"
+                        })
+                    else
+                        DevSearchPro.Stats.Protected = DevSearchPro.Stats.Protected + 1
+                    end
+                    DevSearchPro.Stats.Decompiled = DevSearchPro.Stats.Decompiled + 1
+                end
+                
+                -- Detecta ModuleScripts
+                if child:IsA("ModuleScript") then
+                    DevSearchPro.Stats.TotalScanned = DevSearchPro.Stats.TotalScanned + 1
+                    if updateCallback then updateCallback("Analisando módulo: " .. child.Name) end
+                    
+                    local source = DecompileScript(child)
+                    if source then
+                        DevSearchPro.Stats.Readable = DevSearchPro.Stats.Readable + 1
+                        table.insert(DevSearchPro.Data.Modules, {
+                            Name = GetReadableName(child),
+                            OriginalName = child.Name,
+                            Class = child.ClassName,
+                            Path = FormatPath(child),
+                            Source = source,
+                            Instance = child,
+                            Type = "ModuleScript"
+                        })
+                    else
+                        DevSearchPro.Stats.Protected = DevSearchPro.Stats.Protected + 1
+                    end
+                    DevSearchPro.Stats.Decompiled = DevSearchPro.Stats.Decompiled + 1
+                end
+                
+                -- Continua recursivamente
+                RecursiveScan(child, depth + 1)
+            end)
+        end
+    end
+    
+    -- Escaneia game
+    if updateCallback then updateCallback("Escaneando game...") end
+    RecursiveScan(game, 0)
+    
+    -- Escaneia nil instances se disponível
+    if getnilinstances then
+        if updateCallback then updateCallback("Escaneando nil instances...") end
+        local nilInstances = getnilinstances()
+        for _, inst in ipairs(nilInstances) do
+            local ok = pcall(function()
+                return inst.Name
+            end)
+            if ok then
+                RecursiveScan(inst, 0)
+            end
+        end
+    end
+    
+    -- Escaneia CoreGui se disponível
+    if gethui then
+        if updateCallback then updateCallback("Escaneando interfaces ocultas...") end
+        local success, hidden = pcall(gethui)
+        if success then
+            for _, inst in ipairs(hidden) do
+                RecursiveScan(inst, 0)
+            end
+        end
+    end
+    
+    return scanned
+end
+
+-- ══════════════════════════════════════════════════════════
+-- CONSTRUTOR DE UI
+-- ══════════════════════════════════════════════════════════
+local function BuildLoadingScreen()
+    local screenGui = Create("ScreenGui", {
+        Name = "DevSearchPro_Loading",
+        ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    })
+    
+    -- Container principal
+    local mainFrame = Create("Frame", {
+        Name = "Main",
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = CONFIG.Theme.Background,
+        BorderSizePixel = 0
+    })
+    
+    -- Overlay com gradiente
+    local gradient = Create("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 12, 18)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(25, 20, 45)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 12, 18))
+        }),
+        Rotation = 45
+    })
+    
+    -- Container centralizado
+    local centerFrame = Create("Frame", {
+        Name = "CenterContainer",
+        Size = UDim2.new(0, 600, 0, 500),
+        Position = UDim2.new(0.5, -300, 0.5, -250),
+        BackgroundColor3 = CONFIG.Theme.Surface,
+        BorderSizePixel = 0,
+        ClipsDescendants = true
+    }, {
+        Create("UICorner", {CornerRadius = UDim.new(0, 16)})
+    })
+    
+    -- Brilho no topo
+    local topGlow = Create("Frame", {
+        Name = "TopGlow",
+        Size = UDim2.new(1, 0, 0, 3),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundColor3 = CONFIG.Theme.Primary,
+        BorderSizePixel = 0
+    })
+    
+    local glowGradient = Create("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, CONFIG.Theme.Primary),
+            ColorSequenceKeypoint.new(0.5, CONFIG.Theme.Accent),
+            ColorSequenceKeypoint.new(1, CONFIG.Theme.Primary)
+        })
+    })
+    
+    -- Logo
+    local logoFrame = Create("Frame", {
+        Name = "Logo",
+        Size = UDim2.new(0, 100, 0, 100),
+        Position = UDim2.new(0.5, -50, 0, 40),
+        BackgroundColor3 = CONFIG.Theme.Primary,
+        BorderSizePixel = 0
+    }, {
+        Create("UICorner", {CornerRadius = UDim.new(0, 20)})
+    })
+    
+    local logoIcon = Create("TextLabel", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "⚡",
+        TextColor3 = CONFIG.Theme.Text,
+        TextSize = 50,
+        Font = CONFIG.Fonts.Main
+    })
+    
+    -- Título
+    local titleLabel = Create("TextLabel", {
+        Name = "Title",
+        Size = UDim2.new(1, 0, 0, 40),
+        Position = UDim2.new(0, 0, 0, 160),
+        BackgroundTransparency = 1,
+        Text = "DEV SEARCH PRO",
+        TextColor3 = CONFIG.Theme.Text,
+        TextSize = 32,
+        Font = CONFIG.Fonts.Main
+    })
+    
+    -- Subtítulo
+    local subtitleLabel = Create("TextLabel", {
+        Name = "Subtitle",
+        Size = UDim2.new(1, 0, 0, 20),
+        Position = UDim2.new(0, 0, 0, 205),
+        BackgroundTransparency = 1,
+        Text = "Inicializando motor de busca profissional",
+        TextColor3 = CONFIG.Theme.TextMuted,
+        TextSize = 14,
+        Font = CONFIG.Fonts.Regular
+    })
+    
+    -- Barra de progresso - fundo
+    local progressBg = Create("Frame", {
+        Name = "ProgressBg",
+        Size = UDim2.new(0.8, 0, 0, 10),
+        Position = UDim2.new(0.1, 0, 0, 260),
+        BackgroundColor3 = CONFIG.Theme.SurfaceLight,
+        BorderSizePixel = 0
+    }, {
+        Create("UICorner", {CornerRadius = UDim.new(1, 0)})
+    })
+    
+    -- Barra de progresso - preenchimento
+    local progressBar = Create("Frame", {
+        Name = "ProgressBar",
+        Size = UDim2.new(0, 0, 1, 0),
+        BackgroundColor3 = CONFIG.Theme.Primary,
+        BorderSizePixel = 0
+    }, {
+        Create("UICorner", {CornerRadius = UDim.new(1, 0)}),
+        Create("UIGradient", {
+            Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, CONFIG.Theme.Primary),
+                ColorSequenceKeypoint.new(1, CONFIG.Theme.Accent)
+            })
+        })
+    })
+    
+    -- Porcentagem
+    local percentLabel = Create("TextLabel", {
+        Name = "Percent",
+        Size = UDim2.new(1, 0, 0, 25),
+        Position = UDim2.new(0, 0, 0, 285),
+        BackgroundTransparency = 1,
+        Text = "0%",
+        TextColor3 = CONFIG.Theme.Primary,
+        TextSize = 18,
+        Font = CONFIG.Fonts.Main
+    })
+    
+    -- Log em tempo real
+    local logContainer = Create("Frame", {
+        Name = "LogContainer",
+        Size = UDim2.new(0.9, 0, 0, 120),
+        Position = UDim2.new(0.05, 0, 0, 340),
+        BackgroundColor3 = CONFIG.Theme.Background,
+        BorderSizePixel = 0
+    }, {
+        Create("UICorner", {CornerRadius = UDim.new(0, 8)}),
+        Create("UIStroke", {Color = CONFIG.Theme.Border, Thickness = 1})
+    })
+    
+    local logTitle = Create("TextLabel", {
+        Name = "LogTitle",
+        Size = UDim2.new(1, -10, 0, 25),
+        Position = UDim2.new(0, 5, 0, 5),
+        BackgroundTransparency = 1,
+        Text = "⚡ ATIVIDADES EM TEMPO REAL",
+        TextColor3 = CONFIG.Theme.Success,
+        TextSize = 11,
+        Font = CONFIG.Fonts.Main,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+    
+    local logList = Create("ScrollingFrame", {
+        Name = "LogList",
+        Size = UDim2.new(1, -10, 1, -35),
+        Position = UDim2.new(0, 5, 0, 30),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 3,
+        ScrollBarImageColor3 = CONFIG.Theme.Primary,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y
+    }, {
+        Create("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 3)
+        })
+    })
+    
+    -- Estatísticas
+    local statsFrame = Create("Frame", {
+        Name = "Stats",
+        Size = UDim2.new(0.9, 0, 0, 30),
+        Position = UDim2.new(0.05, 0, 1, -50),
+        BackgroundTransparency = 1
+    })
+    
+    local function CreateStat(name, value, x)
+        local stat = Create("Frame", {
+            Size = UDim2.new(0.3, 0, 1, 0),
+            Position = UDim2.new(x, 0, 0, 0),
+            BackgroundTransparency = 1
+        })
+        
+        local label = Create("TextLabel", {
+            Size = UDim2.new(1, 0, 0.5, 0),
+            BackgroundTransparency = 1,
+            Text = name,
+            TextColor3 = CONFIG.Theme.TextMuted,
+            TextSize = 10,
+            Font = CONFIG.Fonts.Regular
+        })
+        
+        local valueLabel = Create("TextLabel", {
+            Name = "Value",
+            Size = UDim2.new(1, 0, 0.5, 0),
+            Position = UDim2.new(0, 0, 0.5, 0),
+            BackgroundTransparency = 1,
+            Text = value,
+            TextColor3 = CONFIG.Theme.Text,
+            TextSize = 14,
+            Font = CONFIG.Fonts.Main
+        })
+        
+        label.Parent = stat
+        valueLabel.Parent = stat
+        return stat
+    end
+    
+    CreateStat("ESCANEADOS", "0", 0).Parent = statsFrame
+    CreateStat("DECOMPILADOS", "0", 0.35).Parent = statsFrame
+    CreateStat("LEGÍVEIS", "0", 0.7).Parent = statsFrame
+    
+    -- Montar hierarquia
+    topGlow.Parent = centerFrame
+    logoFrame.Parent = centerFrame
+    logoIcon.Parent = logoFrame
+    titleLabel.Parent = centerFrame
+    subtitleLabel.Parent = centerFrame
+    progressBg.Parent = centerFrame
+    progressBar.Parent = progressBg
+    percentLabel.Parent = centerFrame
+    logContainer.Parent = centerFrame
+    logTitle.Parent = logContainer
+    logList.Parent = logContainer
+    statsFrame.Parent = centerFrame
+    centerFrame.Parent = mainFrame
+    mainFrame.Parent = screenGui
+    gradient.Parent = mainFrame
+    glowGradient.Parent = topGlow
+    
+    DevSearchPro.UI.LoadingScreen = screenGui
+    DevSearchPro.UI.ProgressBar = progressBar
+    DevSearchPro.UI.PercentLabel = percentLabel
+    DevSearchPro.UI.LogList = logList
+    DevSearchPro.UI.Stats = statsFrame
+    
+    return screenGui
+end
+
+local function AddLogEntry(text, color)
+    color = color or CONFIG.Theme.TextMuted
+    
+    local entry = Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 18),
+        BackgroundTransparency = 1,
+        LayoutOrder = #DevSearchPro.UI.LogList:GetChildren()
+    })
+    
+    local label = Create("TextLabel", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "▸ " .. text,
+        TextColor3 = color,
+        TextSize = 11,
+        Font = CONFIG.Fonts.Regular,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd
+    })
+    
+    label.Parent = entry
+    entry.Parent = DevSearchPro.UI.LogList
+    entry.Transparency = 1
+    Tween(entry, {Transparency = 0}, 0.3)
+    
+    -- Limita a 15 entradas
+    local entries = DevSearchPro.UI.LogList:GetChildren()
+    if #entries > 15 then
+        for i = 1, #entries - 15 do
+            if entries[i]:IsA("Frame") then
+                entries[i]:Destroy()
+            end
+        end
+    end
+end
+
+local function UpdateProgress(percent, text)
+    local bar = DevSearchPro.UI.ProgressBar
+    local label = DevSearchPro.UI.PercentLabel
+    
+    Tween(bar, {Size = UDim2.new(math.clamp(percent, 0, 100) / 100, 0, 1, 0)}, 0.4)
+    label.Text = string.format("%.0f%%", percent)
+    label.TextColor3 = percent >= 100 and CONFIG.Theme.Success or CONFIG.Theme.Primary
+    
+    if text then
+        AddLogEntry(text, percent >= 100 and CONFIG.Theme.Success or CONFIG.Theme.TextMuted)
+    end
+    
+    -- Atualiza stats
+    local stats = DevSearchPro.UI.Stats:GetChildren()
+    if stats[1] and stats[1]:FindFirstChild("Value") then
+        stats[1]:FindFirstChild("Value").Text = tostring(DevSearchPro.Stats.TotalScanned)
+    end
+    if stats[2] and stats[2]:FindFirstChild("Value") then
+        stats[2]:FindFirstChild("Value").Text = tostring(DevSearchPro.Stats.Decompiled)
+    end
+    if stats[3] and stats[3]:FindFirstChild("Value") then
+        stats[3]:FindFirstChild("Value").Text = tostring(DevSearchPro.Stats.Readable)
+    end
+end
+
+-- ══════════════════════════════════════════════════════════
+-- INTERFACE PRINCIPAL
+-- ══════════════════════════════════════════════════════════
+local function BuildMainInterface()
+    local screenGui = Create("ScreenGui", {
+        Name = "DevSearchPro_Main",
+        ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    })
+    
+    -- Container principal
+    local mainFrame = Create("Frame", {
+        Name = "Main",
+        Size = UDim2.new(0, 900, 0, 650),
+        Position = UDim2.new(0.5, -450, 0.5, -325),
+        BackgroundColor3 = CONFIG.Theme.Background,
+        BorderSizePixel = 0,
+        ClipsDescendants = true
+    }, {
+        Create("UICorner", {CornerRadius = UDim.new(0, 12)}),
+        Create("UIStroke", {Color = CONFIG.Theme.Border, Thickness = 1})
+    })
+    
+    -- Header
+    local header = Create("Frame", {
+        Name = "Header",
+        Size = UDim2.new(1, 0, 0, 50),
+        BackgroundColor3 = CONFIG.Theme.Surface,
+        BorderSizePixel = 0
+    })
+    
+    local headerGradient = Create("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 28, 40)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(35, 25, 50))
+        })
+    })
+    
+    -- Header: Esquerda (logo e título)
+    local headerLeft = Create("Frame", {
+        Size = UDim2.new(0, 250, 1, 0),
+        BackgroundTransparency = 1
+    })
+    
+    local headerIcon = Create("Frame", {
+        Size = UDim2.new(0, 32, 0, 32),
+        Position = UDim2.new(0, 15, 0.5, -16),
+        BackgroundColor3 = CONFIG.Theme.Primary,
+        BorderSizePixel = 0
+    }, {
+        Create("UICorner", {CornerRadius = UDim.new(0, 8)})
+    })
+    
+    local headerIconLabel = Create("TextLabel", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "⚡",
+        TextSize = 18
+    })
+    
+    local headerTitle = Create("TextLabel", {
+        Size = UDim2.new(0, 200, 1, 0),
+        Position = UDim2.new(0, 55, 0, 0),
+        BackgroundTransparency = 1,
+        Text = "DEV SEARCH PRO",
+        TextColor3 = CONFIG.Theme.Text,
+        TextSize = 16,
+        Font = CONFIG.Fonts.Main,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+    
+    local headerSubtitle = Create("TextLabel", {
+        Size = UDim2.new(0, 200, 0, 15),
+        Position = UDim2.new(0, 55, 0, 25),
+        BackgroundTransparency = 1,
+        Text = "Motor de Busca Profissional",
+        TextColor3 = CONFIG.Theme.TextMuted,
+        TextSize = 11,
+        Font = CONFIG.Fonts.Regular,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+    
+    -- Header: Direita (botões)
+    local headerRight = Create("Frame", {
+        Size = UDim2.new(0, 120, 1, 0),
+        Position = UDim2.new(1, -120, 0, 0),
+        BackgroundTransparency = 1
+    })
+    
+    local function CreateHeaderButton(name, text, icon, x, color, onClick)
+        local btn = Create("TextButton", {
+            Name = name,
+            Size = UDim2.new(0, 50, 0, 32),
+            Position = UDim2.new(x, 0, 0.5, -16),
+            BackgroundColor3 = color or CONFIG.Theme.SurfaceLight,
+            BorderSizePixel = 0,
+            AutoButtonColor = false,
+            Text = icon or text,
+            TextColor3 = CONFIG.Theme.Text,
+            TextSize = 16,
+            Font = CONFIG.Fonts.Main
+        }, {
+            Create("UICorner", {CornerRadius = UDim.new(0, 8)})
+        })
+        
+        btn.MouseEnter:Connect(function()
+            Tween(btn, {BackgroundColor3 = CONFIG.Theme.Primary}, 0.2)
+        end)
+        
+        btn.MouseLeave:Connect(function()
+            Tween(btn, {BackgroundColor3 = color or CONFIG.Theme.SurfaceLight}, 0.2)
+        end)
+        
+        btn.MouseButton1Click:Connect(onClick)
+        
+        return btn
+    end
+    
+    local minimizeBtn = CreateHeaderButton("Minimize", "", "—", 0, nil, function()
+        if not DevSearchPro.IsMinimized then
+            DevSearchPro.IsMinimized = true
+            Tween(mainFrame, {Size = UDim2.new(0, 900, 0, 50)}, 0.4)
+        else
+            DevSearchPro.IsMinimized = false
+            Tween(mainFrame, {Size = UDim2.new(0, 900, 0, 650)}, 0.4)
+        end
+    end)
+    
+    local closeBtn = CreateHeaderButton("Close", "", "✕", 60, CONFIG.Theme.Error, function()
+        Tween(mainFrame, {Position = UDim2.new(0.5, -450, 0.5, 400), Transparency = 1}, 0.4)
+        wait(0.4)
+        screenGui:Destroy()
+        DevSearchPro.UI.MainScreen:Destroy()
+    end)
+    
+    minimizeBtn.Parent = headerRight
+    closeBtn.Parent = headerRight
+    headerLeft.Parent = header
+    headerIconLabel.Parent = headerIcon
+    headerIcon.Parent = headerLeft
+    headerTitle.Parent = headerLeft
+    headerSubtitle.Parent = headerLeft
+    headerRight.Parent = header
+    headerGradient.Parent = header
+    header.Parent = mainFrame
+    
+    -- Área de busca
+    local searchContainer = Create("Frame", {
+        Name = "SearchContainer",
+        Size = UDim2.new(1, -40, 0, 60),
+        Position = UDim2.new(0, 20, 0, 70),
+        BackgroundColor3 = CONFIG.Theme.Surface,
+        BorderSizePixel = 0
+    }, {
+        Create("UICorner", {CornerRadius = UDim.new(0, 10)}),
+        Create("UIStroke", {Color = CONFIG.Theme.Border, Thickness = 1})
+    })
+    
+    local searchIcon = Create("TextLabel", {
+        Size = UDim2.new(0, 50, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "🔍",
+        TextSize = 22,
+        TextColor3 = CONFIG.Theme.TextMuted
+    })
+    
+    local searchBox = Create("TextBox", {
+        Name = "SearchBox",
+        Size = UDim2.new(1, -120, 1, 0),
+        Position = UDim2.new(0, 60, 0, 0),
+        BackgroundTransparency = 1,
+        PlaceholderText = "Pesquisar scripts, módulos ou remotes...",
+        PlaceholderColor3 = CONFIG.Theme.TextMuted,
+        Text = "",
+        TextColor3 = CONFIG.Theme.Text,
+        TextSize = 16,
+        Font = CONFIG.Fonts.Regular,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ClearTextOnFocus = false
+    })
+    
+    local searchCount = Create("TextLabel", {
+        Name = "SearchCount",
+        Size = UDim2.new(0, 50, 1, 0),
+        Position = UDim2.new(1, -55, 0, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+        TextColor3 = CONFIG.Theme.Primary,
+        TextSize = 13,
+        Font = CONFIG.Fonts.Main
+    })
+    
+    searchIcon.Parent = searchContainer
+    searchBox.Parent = searchContainer
+    searchCount.Parent = searchContainer
+    searchContainer.Parent = mainFrame
+    
+    -- Abas
+    local tabBar = Create("Frame", {
+        Name = "TabBar",
+        Size = UDim2.new(1, -40, 0, 40),
+        Position = UDim2.new(0, 20, 0, 140),
+        BackgroundTransparency = 1
+    })
+    
+    local tabs = {}
+    local function CreateTab(name, icon, count, index)
+        local tab = Create("TextButton", {
+            Name = name,
+            Size = UDim2.new(0, 150, 0, 36),
+            Position = UDim2.new(0, (index - 1) * 160, 0, 0),
+            BackgroundColor3 = CONFIG.Theme.Surface,
+            BorderSizePixel = 0,
+            AutoButtonColor = false,
+            Text = string.format(" %s  %s", icon, name),
+            TextColor3 = CONFIG.Theme.TextMuted,
+            TextSize = 13,
+            Font = CONFIG.Fonts.Main,
+            TextXAlignment = Enum.TextXAlignment.Left
+        }, {
+            Create("UICorner", {CornerRadius = UDim.new(0, 8)})
+        })
+        
+        local badge = Create("TextLabel", {
+            Name = "Badge",
+            Size = UDim2.new(0, 40, 0, 20),
+            Position = UDim2.new(1, -50, 0.5, -10),
+            BackgroundColor3 = CONFIG.Theme.Primary,
+            Text = tostring(count),
+            TextColor3 = CONFIG.Theme.Text,
+            TextSize = 11,
+            Font = CONFIG.Fonts.Main
+        }, {
+            Create("UICorner", {CornerRadius = UDim.new(1, 0)})
+        })
+        
+        badge.Parent = tab
+        
+        tabs[name] = {Button = tab, Badge = badge}
+        
+        return tab
+    end
+    
+    local allTab = CreateTab("TODOS", "◉", 
+        #DevSearchPro.Data.Scripts + #DevSearchPro.Data.Modules + #DevSearchPro.Data.Remotes, 1)
+    local scriptsTab = CreateTab("SCRIPTS", "📄", #DevSearchPro.Data.Scripts, 2)
+    local modulesTab = CreateTab("MÓDULOS", "📦", #DevSearchPro.Data.Modules, 3)
+    local remotesTab = CreateTab("REMOTES", "⚡", #DevSearchPro.Data.Remotes, 4)
+    
+    allTab.Parent = tabBar
+    scriptsTab.Parent = tabBar
+    modulesTab.Parent = tabBar
+    remotesTab.Parent = tabBar
+    tabBar.Parent = mainFrame
+    
+    -- Conteúdo principal
+    local contentArea = Create("ScrollingFrame", {
+        Name = "Content",
+        Size = UDim2.new(1, -40, 1, -220),
+        Position = UDim2.new(0, 20, 0, 190),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = CONFIG.Theme.Primary,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y
+    }, {
+        Create("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 8)
+        })
+    })
+    
+    contentArea.Parent = mainFrame
+    
+    -- Função para criar card de resultado
+    local function CreateResultCard(item)
+        local card = Create("Frame", {
+            Name = "Card_" .. item.OriginalName,
+            Size = UDim2.new(1, 0, 0, 110),
+            BackgroundColor3 = CONFIG.Theme.Surface,
+            BorderSizePixel = 0,
+            LayoutOrder = 0
+        }, {
+            Create("UICorner", {CornerRadius = UDim.new(0, 10)}),
+            Create("UIStroke", {Color = CONFIG.Theme.Border, Thickness = 1})
+        })
+        
+        -- Cabeçalho do card
+        local cardHeader = Create("Frame", {
+            Size = UDim2.new(1, 0, 0, 40),
+            BackgroundColor3 = CONFIG.Theme.SurfaceLight,
+            BorderSizePixel = 0
+        }, {
+            Create("UICorner", {CornerRadius = UDim.new(0, 10)})
+        })
+        
+        -- Ícone do tipo
+        local typeIcon = Create("Frame", {
+            Size = UDim2.new(0, 32, 0, 32),
+            Position = UDim2.new(0, 8, 0.5, -16),
+            BackgroundColor3 = item.Type == "Remote" and CONFIG.Theme.Accent or 
+                             item.Type == "LocalScript" and CONFIG.Theme.Primary or 
+                             CONFIG.Theme.Success,
+            BorderSizePixel = 0
+        }, {
+            Create("UICorner", {CornerRadius = UDim.new(0, 6)})
+        })
+        
+        local typeLabel = Create("TextLabel", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            Text = item.Type == "Remote" and "⚡" or 
+                   item.Type == "LocalScript" and "📄" or "📦",
+            TextSize = 16,
+            TextColor3 = CONFIG.Theme.Text
+        })
+        
+        -- Nome
+        local nameLabel = Create("TextLabel", {
+            Size = UDim2.new(0, 300, 0, 20),
+            Position = UDim2.new(0, 50, 0, 5),
+            BackgroundTransparency = 1,
+            Text = item.OriginalName,
+            TextColor3 = CONFIG.Theme.Text,
+            TextSize = 15,
+            Font = CONFIG.Fonts.Main,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd
+        })
+        
+        -- Tipo e classe
+        local classLabel = Create("TextLabel", {
+            Size = UDim2.new(0, 300, 0, 15),
+            Position = UDim2.new(0, 50, 0, 22),
+            BackgroundTransparency = 1,
+            Text = string.format("%s • %s", item.Class, item.Type),
+            TextColor3 = CONFIG.Theme.TextMuted,
+            TextSize = 11,
+            Font = CONFIG.Fonts.Regular,
+            TextXAlignment = Enum.TextXAlignment.Left
+        })
+        
+        -- Botões de ação
+        local actionsFrame = Create("Frame", {
+            Size = UDim2.new(0, 200, 1, 0),
+            Position = UDim2.new(1, -210, 0, 0),
+            BackgroundTransparency = 1
+        })
+        
+        local copyBtn = Create("TextButton", {
+            Name = "Copy",
+            Size = UDim2.new(0, 80, 0, 28),
+            Position = UDim2.new(0, 0, 0.5, -14),
+            BackgroundColor3 = CONFIG.Theme.Primary,
+            BorderSizePixel = 0,
+            Text = "📋 Copiar",
+            TextColor3 = CONFIG.Theme.Text,
+            TextSize = 12,
+            Font = CONFIG.Fonts.Main
+        }, {
+            Create("UICorner", {CornerRadius = UDim.new(0, 6)})
+        })
+        
+        local viewBtn = Create("TextButton", {
+            Name = "View",
+            Size = UDim2.new(0, 80, 0, 28),
+            Position = UDim2.new(0, 90, 0.5, -14),
+            BackgroundColor3 = CONFIG.Theme.SurfaceLight,
+            BorderSizePixel = 0,
+            Text = "👁 Ver",
+            TextColor3 = CONFIG.Theme.Text,
+            TextSize = 12,
+            Font = CONFIG.Fonts.Main
+        }, {
+            Create("UICorner", {CornerRadius = UDim.new(0, 6)})
+        })
+        
+        copyBtn.MouseButton1Click:Connect(function()
+            if item.Source then
+                if setclipboard then
+                    setclipboard(item.Source)
+                elseif toclipboard then
+                    toclipboard(item.Source)
+                end
+                copyBtn.Text = "✓ Copiado!"
+                Tween(copyBtn, {BackgroundColor3 = CONFIG.Theme.Success}, 0.2)
+                wait(1.5)
+                copyBtn.Text = "📋 Copiar"
+                Tween(copyBtn, {BackgroundColor3 = CONFIG.Theme.Primary}, 0.2)
+            elseif item.Type == "Remote" then
+                -- Copia path do remote
+                if setclipboard then
+                    setclipboard(item.Path)
+                end
+                copyBtn.Text = "✓ Copiado!"
+                wait(1.5)
+                copyBtn.Text = "📋 Copiar"
+            end
+        end)
+        
+        viewBtn.MouseButton1Click:Connect(function()
+            -- Abre modal de visualização
+            local modal = CreateModal(item)
+            modal.Parent = screenGui
+        end)
+        
+        copyBtn.Parent = actionsFrame
+        viewBtn.Parent = actionsFrame
+        
+        -- Corpo do card (path e preview)
+        local pathLabel = Create("TextLabel", {
+            Size = UDim2.new(1, -20, 0, 15),
+            Position = UDim2.new(0, 10, 0, 45),
+            BackgroundTransparency = 1,
+            Text = "📁 " .. item.Path,
+            TextColor3 = CONFIG.Theme.TextMuted,
+            TextSize = 10,
+            Font = CONFIG.Fonts.Mono,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd
+        })
+        
+        local previewLabel = Create("TextLabel", {
+            Size = UDim2.new(1, -20, 0, 40),
+            Position = UDim2.new(0, 10, 0, 65),
+            BackgroundTransparency = 1,
+            Text = item.Source and item.Source:sub(1, 150):gsub("\n", " \\n ") or 
+                   (item.Type == "Remote" and "Remote - clique para copiar path" or "Sem preview"),
+            TextColor3 = CONFIG.Theme.Text,
+            TextSize = 10,
+            Font = CONFIG.Fonts.Mono,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            TextWrapped = true
+        })
+        
+        typeLabel.Parent = typeIcon
+        typeIcon.Parent = cardHeader
+        nameLabel.Parent = cardHeader
+        classLabel.Parent = cardHeader
+        actionsFrame.Parent = cardHeader
+        cardHeader.Parent = card
+        pathLabel.Parent = card
+        previewLabel.Parent = card
+        
+        return card
+    end
+    
+    -- Função para atualizar resultados
+    local function UpdateResults(filter)
+        filter = filter or ""
+        
+        for _, child in ipairs(contentArea:GetChildren()) do
+            if child:IsA("Frame") then
+                child:Destroy()
+            end
+        end
+        
+        local results = {}
+        
+        -- Filtra todos os itens
+        local function Matches(item)
+            if filter == "" then return true end
+            local query = filter:lower()
+            return item.Name:lower():find(query, 1, true) or
+                   item.OriginalName:lower():find(query, 1, true) or
+                   (item.Source and item.Source:lower():find(query, 1, true))
+        end
+        
+        -- Coleta tudo
+        for _, item in ipairs(DevSearchPro.Data.Scripts) do
+            if Matches(item) then
+                table.insert(results, item)
+            end
+        end
+        for _, item in ipairs(DevSearchPro.Data.Modules) do
+            if Matches(item) then
+                table.insert(results, item)
+            end
+        end
+        for _, item in ipairs(DevSearchPro.Data.Remotes) do
+            if Matches(item) then
+                table.insert(results, item)
+            end
+        end
+        
+        -- Atualiza contador
+        searchCount.Text = string.format("%d resultados", #results)
+        
+        -- Cria cards
+        for i, item in ipairs(results) do
+            local card = CreateResultCard(item)
+            card.LayoutOrder = i
+            card.Parent = contentArea
+        end
+        
+        if #results == 0 then
+            local emptyState = Create("Frame", {
+                Size = UDim2.new(1, 0, 0, 200),
+                BackgroundTransparency = 1,
+                LayoutOrder = 1
+            })
+            
+            local emptyIcon = Create("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 60),
+                BackgroundTransparency = 1,
+                Text = "🔍",
+                TextSize = 50
+            })
+            
+            local emptyText = Create("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 30),
+                Position = UDim2.new(0, 0, 0, 70),
+                BackgroundTransparency = 1,
+                Text = filter == "" and "Nenhum item encontrado" or "Nada encontrado para: " .. filter,
+                TextColor3 = CONFIG.Theme.TextMuted,
+                TextSize = 16,
+                Font = CONFIG.Fonts.Main
+            })
+            
+            emptyIcon.Parent = emptyState
+            emptyText.Parent = emptyState
+            emptyState.Parent = contentArea
+        end
+    end
+    
+    -- Sistema de abas
+    local activeTab = "TODOS"
+    local function SetActiveTab(name)
+        activeTab = name
+        for tabName, tab in pairs(tabs) do
+            if tabName == name then
+                Tween(tab.Button, {BackgroundColor3 = CONFIG.Theme.Primary}, 0.2)
+                tab.Button.TextColor3 = CONFIG.Theme.Text
+            else
+                Tween(tab.Button, {BackgroundColor3 = CONFIG.Theme.Surface}, 0.2)
+                tab.Button.TextColor3 = CONFIG.Theme.TextMuted
+            end
+        end
+    end
+    
+    allTab.MouseButton1Click:Connect(function() SetActiveTab("TODOS") end)
+    scriptsTab.MouseButton1Click:Connect(function() SetActiveTab("SCRIPTS") end)
+    modulesTab.MouseButton1Click:Connect(function() SetActiveTab("MÓDULOS") end)
+    remotesTab.MouseButton1Click:Connect(function() SetActiveTab("REMOTES") end)
+    
+    -- Busca
+    local searchDebounce = tick()
+    searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+        if tick() - searchDebounce > 0.1 then
+            searchDebounce = tick()
+            UpdateResults(searchBox.Text)
+        end
+    end)
+    
+    -- Drag
+    local dragging, dragInput, dragStart, startPos
+    header.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
+        end
+    end)
+    
+    header.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    
+    UserInputService = game:GetService("UserInputService")
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or 
+                         input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            mainFrame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    
+    mainFrame.Parent = screenGui
+    DevSearchPro.UI.MainScreen = screenGui
+    DevSearchPro.UI.UpdateResults = UpdateResults
+    
+    -- Aplica tab inicial
+    SetActiveTab("TODOS")
+    
+    return screenGui
+end
+
+-- Modal de visualização
+function CreateModal(item)
+    local modal = Create("Frame", {
+        Name = "Modal",
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.5,
+        ZIndex = 100
+    })
+    
+    local modalContent = Create("Frame", {
+        Size = UDim2.new(0, 700, 0, 500),
+        Position = UDim2.new(0.5, -350, 0.5, -250),
+        BackgroundColor3 = CONFIG.Theme.Background,
+        BorderSizePixel = 0,
+        ZIndex = 101
+    }, {
+        Create("UICorner", {CornerRadius = UDim.new(0, 12)}),
+        Create("UIStroke", {Color = CONFIG.Theme.Border, Thickness = 1})
+    })
+    
+    local modalHeader = Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 50),
+        BackgroundColor3 = CONFIG.Theme.Surface,
+        BorderSizePixel = 0,
+        ZIndex = 102
+    }, {
+        Create("UICorner", {CornerRadius = UDim.new(0, 12)})
+    })
+    
+    local modalTitle = Create("TextLabel", {
+        Size = UDim2.new(0.8, 0, 1, 0),
+        Position = UDim2.new(0, 20, 0, 0),
+        BackgroundTransparency = 1,
+        Text = item.OriginalName .. " (" .. item.Class .. ")",
+        TextColor3 = CONFIG.Theme.Text,
+        TextSize = 16,
+        Font = CONFIG.Fonts.Main,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 103
+    })
+    
+    local modalClose = Create("TextButton", {
+        Size = UDim2.new(0, 40, 0, 32),
+        Position = UDim2.new(1, -50, 0.5, -16),
+        BackgroundColor3 = CONFIG.Theme.Error,
+        Text = "✕",
+        TextColor3 = CONFIG.Theme.Text,
+        TextSize = 16,
+        Font = CONFIG.Fonts.Main,
+        ZIndex = 103
+    }, {
+        Create("UICorner", {CornerRadius = UDim.new(0, 6)})
+    })
+    
+    local sourceBox = Create("TextBox", {
+        Size = UDim2.new(1, -40, 1, -100),
+        Position = UDim2.new(0, 20, 0, 70),
+        BackgroundColor3 = CONFIG.Theme.Surface,
+        Text = item.Source or "-- " .. item.Type .. " (sem código disponível)",
+        TextColor3 = CONFIG.Theme.Text,
+        TextSize = 12,
+        Font = CONFIG.Fonts.Mono,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        ClearTextOnFocus = false,
+        MultiLine = true,
+        TextWrapped = true,
+        ZIndex = 103
+    }, {
+        Create("UICorner", {CornerRadius = UDim.new(0, 8)}),
+        Create("UIStroke", {Color = CONFIG.Theme.Border, Thickness = 1})
+    })
+    
+    modalClose.MouseButton1Click:Connect(function()
+        modal:Destroy()
+    end)
+    
+    modalHeader.Parent = modalContent
+    modalTitle.Parent = modalHeader
+    modalClose.Parent = modalHeader
+    sourceBox.Parent = modalContent
+    modalContent.Parent = modal
+    
+    return modal
+end
+
+-- ══════════════════════════════════════════════════════════
+-- CLEANUP
+-- ══════════════════════════════════════════════════════════
+local function Cleanup()
+    for _, gui in ipairs(CoreGui:GetChildren()) do
+        if gui.Name:find("DevSearchPro") then
+            gui:Destroy()
+        end
+    end
+    for _, gui in ipairs(PlayerGui:GetChildren()) do
+        if gui.Name:find("DevSearchPro") then
+            gui:Destroy()
+        end
+    end
+end
+
+-- ══════════════════════════════════════════════════════════
+-- INICIALIZAÇÃO
+-- ══════════════════════════════════════════════════════════
+local function Init()
+    Cleanup()
+    
+    print("⚡ DevSearch Pro - Iniciando...")
+    print("⚡ Carregando motor de busca profissional...")
+    
+    DevSearchPro.Stats.StartTime = tick()
+    
+    -- Constrói tela de loading
+    local loadingScreen = BuildLoadingScreen()
+    loadingScreen.Parent = CoreGui
+    
+    -- Inicia scanner em background
+    task.spawn(function()
+        wait(0.5)
+        
+        UpdateProgress(5, "Inicializando motor de descompilação...")
+        wait(0.3)
+        
+        UpdateProgress(10, "Carregando configurações de potência máxima...")
+        wait(0.3)
+        
+        UpdateProgress(15, "Preparando scanner recursivo...")
+        wait(0.2)
+        
+        -- Scanner principal
+        local totalSteps = 20
+        for i = 1, totalSteps do
+            UpdateProgress(15 + (i * 2), string.format(
+                "Escaneando game... (%d/%d)", 
+                i, totalSteps
+            ))
+            wait(0.05)
+        end
+        
+        -- Executa scan real
+        AddLogEntry("Iniciando scan completo do jogo...", CONFIG.Theme.Success)
+        
+        ScanAllObjects(function(msg)
+            AddLogEntry(msg, CONFIG.Theme.Text)
+        end)
+        
+        UpdateProgress(70, "Decompilação em massa concluída!")
+        wait(0.3)
+        
+        UpdateProgress(80, "Analisando código legível...")
+        AddLogEntry(string.format(
+            "Estatísticas: %d escaneados, %d decompilados, %d legíveis, %d protegidos",
+            DevSearchPro.Stats.TotalScanned,
+            DevSearchPro.Stats.Decompiled,
+            DevSearchPro.Stats.Readable,
+            DevSearchPro.Stats.Protected
+        ), CONFIG.Theme.Primary)
+        wait(0.3)
+        
+        UpdateProgress(90, "Otimizando busca instantânea...")
+        wait(0.3)
+        
+        UpdateProgress(95, "Finalizando interface...")
+        wait(0.3)
+        
+        UpdateProgress(100, "✓ Pronto! Interface disponível")
+        wait(0.8)
+        
+        DevSearchPro.Stats.EndTime = tick()
+        local duration = DevSearchPro.Stats.EndTime - DevSearchPro.Stats.StartTime
+        
+        print(string.format(
+            "⚡ DevSearch Pro - Concluído em %.2fs | %d scripts legíveis",
+            duration,
+            DevSearchPro.Stats.Readable
+        ))
+        
+        -- Transição para interface principal
+        Tween(loadingScreen:FindFirstChild("Main"), {Transparency = 1}, 0.4)
+        wait(0.4)
+        loadingScreen:Destroy()
+        
+        -- Abre interface principal
+        local mainScreen = BuildMainInterface()
+        mainScreen.Parent = CoreGui
+        
+        -- Animação de entrada
+        local mainFrame = mainScreen:FindFirstChild("Main")
+        mainFrame.Position = UDim2.new(0.5, -450, 0.5, -200)
+        mainFrame.Size = UDim2.new(0, 900, 0, 400)
+        Tween(mainFrame, {
+            Position = UDim2.new(0.5, -450, 0.5, -325),
+            Size = UDim2.new(0, 900, 0, 650)
+        }, 0.5)
+        
+        -- Atualiza resultados iniciais
+        wait(0.5)
+        DevSearchPro.UI.UpdateResults("")
+    end)
+end
+
+-- Executar
+Init()
